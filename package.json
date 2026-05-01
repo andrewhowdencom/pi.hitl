@@ -6,6 +6,9 @@
     "pi-package"
   ],
   "license": "MIT",
+  "scripts": {
+    "test": "tsx --test flatten-rules.test.ts"
+  },
   "pi": {
     "extensions": [
       "./index.ts"
@@ -20,6 +23,7 @@
     "yaml": "^2.8.3"
   },
   "devDependencies": {
+    "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   }
 }

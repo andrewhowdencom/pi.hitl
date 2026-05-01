@@ -39,22 +39,7 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
-
-type Action = "allow" | "block" | "confirm";
-
-interface Rule {
-	name: string;
-	condition: string;
-	action: Action;
-	message?: string;
-}
-
-interface Config {
-	version: number;
-	default_action: Action;
-	rules: Rule[];
-	hidden_tools: string[];
-}
+import { type Action, type Rule, type Config, flattenRules } from "./rules.ts";
 
 interface PermissionsState {
 	enabled: boolean;
@@ -147,38 +132,8 @@ function loadConfig(cwd: string): Config | undefined {
 		return undefined; // No config found — extension is inactive
 	}
 
-	// Validate and parse rules
-	const rules: Rule[] = [];
-	for (const entry of rawRules) {
-		if (!entry || typeof entry !== "object") continue;
-
-		const name = String((entry as Record<string, unknown>).name ?? "");
-		const condition = String((entry as Record<string, unknown>).condition ?? "");
-		const action = String((entry as Record<string, unknown>).action ?? "") as Action;
-		const message = (entry as Record<string, unknown>).message
-			? String((entry as Record<string, unknown>).message)
-			: undefined;
-
-		if (!name || !condition || !action) {
-			console.error(`[permissions] Warning: Invalid rule (missing name, condition, or action):`, entry);
-			continue;
-		}
-
-		if (!["allow", "block", "confirm"].includes(action)) {
-			console.error(`[permissions] Warning: Invalid action "${action}" in rule "${name}"`);
-			continue;
-		}
-
-		// Validate CEL syntax eagerly so broken rules fail at load time
-		try {
-			parseCel(condition);
-		} catch (e) {
-			console.error(`[permissions] Warning: Invalid CEL expression in rule "${name}":`, e);
-			continue;
-		}
-
-		rules.push({ name, condition, action, message });
-	}
+	// Validate and flatten nested rules into a single ordered list
+	const rules = flattenRules(rawRules);
 
 	const hidden_tools = Array.isArray(raw.hidden_tools)
 		? [...new Set(raw.hidden_tools.map(String))]
@@ -228,7 +183,7 @@ function buildContext(toolName: string, input: unknown, cwd: string): Record<str
 
 function evaluateRule(rule: Rule, context: Record<string, unknown>): boolean {
 	try {
-		const result = run(rule.condition, context, CEL_OPTIONS);
+		const result = run(rule.condition, context as Parameters<typeof run>[1], CEL_OPTIONS);
 		if (isCelError(result)) {
 			console.error(`[permissions] CEL error in rule "${rule.name}":`, result);
 			return false;

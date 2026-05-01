@@ -102,6 +102,37 @@ hidden_tools:
   - "tool_name"  # These tools are silently blocked (LLM can still see them)
 ```
 
+### Nested rules
+
+Rules can be nested to group related conditions without repeating shared prefixes. A rule with `rules` (instead of `action`) acts as a parent — its condition is automatically **AND-ed** with every child's condition, and its name is prefixed onto every child's name.
+
+```yaml
+rules:
+  - name: "Bash"
+    condition: 'tool == "bash"'
+    rules:
+      - name: "rm"
+        condition: 'command.contains("rm")'
+        action: block
+      - name: "find"
+        condition: 'command.startsWith("find .")'
+        action: allow
+      - name: "default"
+        condition: 'true'
+        action: confirm
+```
+
+At load time this expands to three flat rules:
+
+1. `(tool == "bash") && (command.contains("rm"))` → block  
+   name: `Bash > rm`
+2. `(tool == "bash") && (command.startsWith("find ."))` → allow  
+   name: `Bash > find`
+3. `(tool == "bash") && (true)` → confirm  
+   name: `Bash > default`
+
+The runtime engine stays unchanged — rules are still evaluated **top-to-bottom**, first match wins. Nesting is purely a YAML convenience for readability and DRY conditions. Include an explicit `condition: 'true'` catch-all as the last child if you want a group default.
+
 ### Rule evaluation order
 
 Rules are evaluated **top-to-bottom**. The **first matching rule wins**.
@@ -179,6 +210,42 @@ rules:
     action: block
     message: "sudo is not allowed"
 ```
+
+### Bash policy with nested rules
+
+Group all bash-related rules under a single parent so the global rule list stays clean:
+
+```yaml
+version: 1
+default_action: block
+rules:
+  - name: "Allow reads in project"
+    condition: 'path.startsWith(cwd)'
+    action: allow
+
+  - name: "Bash"
+    condition: 'tool == "bash"'
+    rules:
+      - name: "Allow safe commands"
+        condition: 'command.matches("^(ls|find|grep|git\\s+status)\\b")'
+        action: allow
+
+      - name: "Block destructive commands"
+        condition: 'command.contains("rm") || command.contains("sudo")'
+        action: block
+        message: "Destructive shell commands are blocked"
+
+      - name: "Confirm other bash"
+        condition: 'true'
+        action: confirm
+        message: "Shell commands require manual approval"
+```
+
+**Result:**
+- `read ./src/main.ts` → ✅ allowed (matches global path rule)
+- `bash ls -la` → ✅ allowed (safe command)
+- `bash rm -rf /` → ❌ blocked (destructive)
+- `bash npm install` → 🔒 confirmed (catches all remaining bash)
 
 See also the [how-to guides](docs/how-to/) for practical recipes — mcp-cli rules, allowing harmless tools, and more.
 
