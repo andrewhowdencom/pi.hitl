@@ -65,3 +65,9 @@ rules:
     condition: 'tool == "TaskList" || tool == "TaskGet" || tool == "TaskOutput" || tool == "TaskCreate" || tool == "TaskUpdate"'
     action: allow
 ```
+
+## See also
+
+- [Write rules for mcp-cli invocations through the bash tool](handle-mcp-cli-calls.md)
+- [Full list of CEL variables available in conditions](../reference/cel-variables.md)
+- [YAML configuration schema and nested rules](../reference/config-schema.md)

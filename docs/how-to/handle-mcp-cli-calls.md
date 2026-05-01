@@ -24,6 +24,8 @@ Use `command.contains()` or `command.matches()` (regex) to match mcp-cli pattern
 
 ### Allow safe discovery operations
 
+> **YAML escaping note:** The double backslash `\\` in `\\s` is required because the condition string is inside a YAML double-quoted string. YAML interprets `\\` as a single `\`, which is what the CEL regex engine receives.
+
 ```yaml
 rules:
   - name: "Allow mcp-cli discovery"
@@ -74,3 +76,9 @@ rules:
 - Arguments piped from stdin (`cat args.json | mcp-cli call ...`) can't be inspected — the rule matches on the visible command string only.
 - Only coarse server/tool-level rules are possible. You cannot do path-based sandboxing (e.g. "only allow reads within cwd") without parsing the JSON arguments.
 - If you need path-based rules for MCP filesystem operations, the mcp-cli arguments must be inline in the command. Piped JSON is invisible to CEL.
+
+## See also
+
+- [Allow safe built-in tools without confirmation dialogs](allow-harmless-tools.md)
+- [CEL variables, including `command`](../reference/cel-variables.md)
+- [YAML rule schema](../reference/config-schema.md)

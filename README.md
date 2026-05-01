@@ -1,8 +1,8 @@
 # pi.hitl
 
-Pi (Harness): CEL-based permission sandbox for the [pi coding agent](https://github.com/badlogic/pi-mono).
+CEL-based permission sandbox for the [pi coding agent](https://github.com/badlogic/pi-mono).
 
-This extension intercepts every tool call the LLM attempts and evaluates it against a set of CEL (Common Expression Language) rules defined in YAML configuration. Rules can **allow** operations within a sandbox, **block** dangerous actions, or **confirm** sensitive operations with an interactive dialog.
+This extension intercepts every tool call the LLM attempts and evaluates it against CEL (Common Expression Language) rules defined in YAML. Rules can **allow** operations within a sandbox, **block** dangerous actions, or **confirm** sensitive operations with an interactive dialog.
 
 ## Quick Example
 
@@ -35,253 +35,37 @@ Result:
 
 ### Via `pi install` (recommended)
 
-Install from git globally:
-
+Install globally:
 ```bash
 pi install git:github.com/andrewhowdencom/pi.hitl
 ```
 
-Or install project-local:
-
+Or project-local:
 ```bash
 pi install -l git:github.com/andrewhowdencom/pi.hitl
 ```
 
-Pin to a specific version with a ref:
-
-```bash
-pi install git:github.com/andrewhowdencom/pi.hitl@v0.2.0
-```
-
 ### Manual copy
 
-#### Global (all projects)
-
+Global (all projects):
 ```bash
 cp index.ts ~/.pi/agent/extensions/permissions.ts
 ```
 
-#### Project-local (current project only)
-
+Project-local (current project only):
 ```bash
 mkdir -p .pi/extensions
 cp index.ts .pi/extensions/permissions.ts
 ```
 
 ### Quick test (without installing)
-
 ```bash
 pi -e ./index.ts
 ```
 
-## Configuration
+## Documentation
 
-Rules are defined in YAML files loaded at startup and on `/permissions reload`.
-
-### Config locations (merged, project overrides global)
-
-| Location | Scope |
-|----------|-------|
-| `~/.agents/permissions.yaml` | Agent-wide defaults (lowest priority) |
-| `~/.pi/agent/permissions.yaml` | Global (all projects) |
-| `.pi/permissions.yaml` | Project-local (overrides global) |
-
-### Config schema
-
-```yaml
-version: 1
-default_action: block   # Optional; defaults to block if omitted
-
-rules:
-  - name: "Human-readable rule name"
-    condition: 'CEL expression'   # Must evaluate to true for the rule to fire
-    action: allow | block | confirm
-    message: "Optional message shown when blocking"
-
-hidden_tools:
-  - "tool_name"  # These tools are silently blocked (LLM can still see them)
-```
-
-### Nested rules
-
-Rules can be nested to group related conditions without repeating shared prefixes. A rule with `rules` (instead of `action`) acts as a parent — its condition is automatically **AND-ed** with every child's condition, and its name is prefixed onto every child's name.
-
-```yaml
-rules:
-  - name: "Bash"
-    condition: 'tool == "bash"'
-    rules:
-      - name: "rm"
-        condition: 'command.contains("rm")'
-        action: block
-      - name: "find"
-        condition: 'command.startsWith("find .")'
-        action: allow
-      - name: "default"
-        condition: 'true'
-        action: confirm
-```
-
-At load time this expands to three flat rules:
-
-1. `(tool == "bash") && (command.contains("rm"))` → block  
-   name: `Bash > rm`
-2. `(tool == "bash") && (command.startsWith("find ."))` → allow  
-   name: `Bash > find`
-3. `(tool == "bash") && (true)` → confirm  
-   name: `Bash > default`
-
-The runtime engine stays unchanged — rules are still evaluated **top-to-bottom**, first match wins. Nesting is purely a YAML convenience for readability and DRY conditions. Include an explicit `condition: 'true'` catch-all as the last child if you want a group default.
-
-### Rule evaluation order
-
-Rules are evaluated **top-to-bottom**. The **first matching rule wins**.
-
-### Default action
-
-If no rule matches, the `default_action` is applied:
-- `allow` — execute the tool
-- `block` — reject with a message (safest default)
-- `confirm` — show a confirmation dialog (or block in non-interactive mode)
-
-### CEL variables
-
-Available in every rule's `condition`:
-
-| Variable | Type | Description |
-|----------|------|-------------|
-| `tool` | `string` | Tool name: `read`, `write`, `edit`, `bash`, or custom tool name |
-| `args` | `map` | Full tool arguments object (e.g., `args.path`, `args.timeout`) |
-| `cwd` | `string` | Current working directory (absolute, resolved) |
-| `path` | `string` | Resolved absolute path for file-based tools; `""` for bash and tools without a path argument |
-| `command` | `string` | Bash command string (bash tool only) |
-
-### CEL functions
-
-| Function | Description | Example |
-|----------|-------------|---------|
-| `path.startsWith(prefix)` | String prefix check | `path.startsWith(cwd)` |
-| `path.contains(substr)` | Substring check | `command.contains("sudo")` |
-| `str.matches(pattern)` | Regex match (custom) | `command.matches("rm\\s+-rf")` |
-
-Standard CEL functions like `==`, `!=`, `&&`, `\|\|`, `!` also work.
-
-### Path resolution
-
-All relative paths are resolved to **absolute paths** before CEL evaluation. This means:
-
-- `path.startsWith(cwd)` correctly handles `./src/file.ts` → resolves to `/home/user/project/src/file.ts`
-- `../other/file.ts` → resolves to `/home/user/other/file.ts` (won't match `cwd`)
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `/permissions` | Show current rules, status, and hidden tools |
-| `/permissions status` | Same as `/permissions` — show current state |
-| `/permissions reload` | Reload config from disk |
-| `/permissions on` | Enable permission checks |
-| `/permissions off` | Disable permission checks (allow all) |
-
-## Example configs
-
-### Read-only mode
-
-```yaml
-version: 1
-default_action: block
-rules:
-  - name: "Allow reads"
-    condition: 'tool == "read"'
-    action: allow
-```
-
-### Confirm destructive operations
-
-```yaml
-version: 1
-default_action: allow
-rules:
-  - name: "Confirm rm"
-    condition: 'tool == "bash" && command.contains("rm")'
-    action: confirm
-  - name: "Block sudo"
-    condition: 'tool == "bash" && command.contains("sudo")'
-    action: block
-    message: "sudo is not allowed"
-```
-
-### Bash policy with nested rules
-
-Group all bash-related rules under a single parent so the global rule list stays clean:
-
-```yaml
-version: 1
-default_action: block
-rules:
-  - name: "Allow reads in project"
-    condition: 'path.startsWith(cwd)'
-    action: allow
-
-  - name: "Bash"
-    condition: 'tool == "bash"'
-    rules:
-      - name: "Allow safe commands"
-        condition: 'command.matches("^(ls|find|grep|git\\s+status)\\b")'
-        action: allow
-
-      - name: "Block destructive commands"
-        condition: 'command.contains("rm") || command.contains("sudo")'
-        action: block
-        message: "Destructive shell commands are blocked"
-
-      - name: "Confirm other bash"
-        condition: 'true'
-        action: confirm
-        message: "Shell commands require manual approval"
-```
-
-**Result:**
-- `read ./src/main.ts` → ✅ allowed (matches global path rule)
-- `bash ls -la` → ✅ allowed (safe command)
-- `bash rm -rf /` → ❌ blocked (destructive)
-- `bash npm install` → 🔒 confirmed (catches all remaining bash)
-
-See also the [how-to guides](docs/how-to/) for practical recipes — mcp-cli rules, allowing harmless tools, and more.
-
-### Hide tools entirely
-
-```yaml
-version: 1
-default_action: allow
-rules: []
-hidden_tools:
-  - "bash"
-  - "write"
-```
-
-## How it works
-
-1. **Config load** — On session start, the extension loads and merges `~/.pi/agent/permissions.yaml` and `.pi/permissions.yaml`
-2. **System prompt injection** — If sandbox rules are detected, a note is injected into the system prompt so the LLM knows its constraints
-3. **Tool call interception** — Every `tool_call` event evaluates the rules in order against the tool's context (name, arguments, cwd, resolved path)
-4. **Action** — The first matching rule determines the outcome:
-   - `allow`: execute normally
-   - `block`: reject with an explanatory message
-   - `confirm`: show a `ctx.ui.confirm()` dialog; in non-interactive modes (`-p`, `--mode json`, `--mode rpc`), confirmation defaults to **block**
-
-## State Persistence
-
-The on/off state from `/permissions on|off` is persisted in the session via `pi.appendEntry()`, so it survives:
-- Session reload (`/reload`)
-- Session resume (`/resume`)
-- Session forks (`/fork`, `/clone`)
-
-## Behavior
-
-- **Denied in a turn:** If you deny one tool in a multi-tool turn, all remaining tools in that turn are automatically blocked to avoid approval spam.
-- **Non-interactive modes:** When running `pi -p` (print mode), `--mode json`, or `--mode rpc`, `confirm` actions default to **block** since no UI is available.
-- **Hidden tools:** Tools listed in `hidden_tools` are silently blocked on every call.
+For the full documentation — tutorials, how-to guides, reference, and architecture explanations — see the [documentation hub](docs/index.md).
 
 ## License
 
