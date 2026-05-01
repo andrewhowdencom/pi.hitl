@@ -118,7 +118,7 @@ Available in every rule's `condition`:
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `tool` | `string` | Tool name: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, or custom tool name |
+| `tool` | `string` | Tool name: `read`, `write`, `edit`, `bash`, or custom tool name |
 | `args` | `map` | Full tool arguments object (e.g., `args.path`, `args.timeout`) |
 | `cwd` | `string` | Current working directory (absolute, resolved) |
 | `path` | `string` | Resolved absolute path for file-based tools; `""` for bash and tools without a path argument |
@@ -146,6 +146,7 @@ All relative paths are resolved to **absolute paths** before CEL evaluation. Thi
 | Command | Description |
 |---------|-------------|
 | `/permissions` | Show current rules, status, and hidden tools |
+| `/permissions status` | Same as `/permissions` — show current state |
 | `/permissions reload` | Reload config from disk |
 | `/permissions on` | Enable permission checks |
 | `/permissions off` | Disable permission checks (allow all) |
@@ -156,9 +157,10 @@ All relative paths are resolved to **absolute paths** before CEL evaluation. Thi
 
 ```yaml
 version: 1
+default_action: block
 rules:
   - name: "Allow reads"
-    condition: 'tool == "read" || tool == "grep" || tool == "find" || tool == "ls"'
+    condition: 'tool == "read"'
     action: allow
 ```
 
