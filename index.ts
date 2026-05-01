@@ -323,7 +323,7 @@ export default function (pi: ExtensionAPI) {
 						}
 						const ok = await ctx.ui.confirm(
 							`🔒 Permission Rule: ${rule.name}`,
-							`${rule.message ?? "This operation requires approval."}\n\nTool: ${event.toolName}\n\nAllow this tool call to execute?`,
+							`${rule.message ?? "This operation requires approval."}\n\nTool: ${event.toolName}\n\nArgs:\n${JSON.stringify(event.input, null, 2)}\n\nAllow this tool call to execute?`,
 						);
 						if (!ok) {
 							deniedThisTurn = true;
@@ -359,7 +359,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			const ok = await ctx.ui.confirm(
 				`🔒 Permission Check`,
-				`No rule matched for tool "${event.toolName}". Allow?`,
+				`No rule matched for tool "${event.toolName}".\n\nArgs:\n${JSON.stringify(event.input, null, 2)}\n\nAllow?`,
 			);
 			if (!ok) {
 				deniedThisTurn = true;
