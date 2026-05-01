@@ -327,7 +327,15 @@ export default function (pi: ExtensionAPI) {
 						);
 						if (!ok) {
 							deniedThisTurn = true;
-							return { block: true, reason: `Blocked by user (rule: ${rule.name})` };
+							let guidance = "";
+							const input = await ctx.ui.editor(
+								"Permission denied — how should I adjust to get approval?",
+								"",
+							);
+							if (input?.trim()) {
+								guidance = `\n\nUser guidance: ${input.trim()}`;
+							}
+							return { block: true, reason: `Blocked by user (rule: ${rule.name})${guidance}` };
 						}
 						return undefined;
 					}
@@ -355,7 +363,15 @@ export default function (pi: ExtensionAPI) {
 			);
 			if (!ok) {
 				deniedThisTurn = true;
-				return { block: true, reason: "Blocked by user (default action)" };
+				let guidance = "";
+				const input = await ctx.ui.editor(
+					"Permission denied — how should I adjust to get approval?",
+					"",
+				);
+				if (input?.trim()) {
+					guidance = `\n\nUser guidance: ${input.trim()}`;
+				}
+				return { block: true, reason: `Blocked by user (default action)${guidance}` };
 			}
 			return undefined;
 		}
