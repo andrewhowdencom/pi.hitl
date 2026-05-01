@@ -82,6 +82,7 @@ Rules are defined in YAML files loaded at startup and on `/permissions reload`.
 
 | Location | Scope |
 |----------|-------|
+| `~/.agents/permissions.yaml` | Agent-wide defaults (lowest priority) |
 | `~/.pi/agent/permissions.yaml` | Global (all projects) |
 | `.pi/permissions.yaml` | Project-local (overrides global) |
 
@@ -178,6 +179,8 @@ rules:
     action: block
     message: "sudo is not allowed"
 ```
+
+See also the [how-to guides](docs/how-to/) for practical recipes — mcp-cli rules, allowing harmless tools, and more.
 
 ### Hide tools entirely
 

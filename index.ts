@@ -6,6 +6,7 @@
  * while requiring approval (or blocking) for operations outside it.
  *
  * Configuration files (merged, project takes precedence):
+ *   ~/.agents/permissions.yaml       (agent-wide defaults)
  *   ~/.pi/agent/permissions.yaml    (global)
  *   .pi/permissions.yaml            (project-local)
  *
@@ -35,6 +36,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { run, isCelError, celFunc, CelScalar, parse as parseCel } from "@bufbuild/cel";
 import { parse as parseYaml } from "yaml";
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
 
@@ -73,18 +75,43 @@ const CEL_OPTIONS = { funcs: [matchesFunc] };
 // ─── Config loading ─────────────────────────────────────────────────────────
 
 function loadConfig(cwd: string): Config | undefined {
+	const agentsPath = resolve(homedir(), ".agents", "permissions.yaml");
 	const globalPath = resolve(getAgentDir(), "permissions.yaml");
 	const projectPath = resolve(cwd, ".pi", "permissions.yaml");
 
 	let raw: Record<string, unknown> = {};
 
-	// Load global config
+	// Load agent-wide defaults
+	if (existsSync(agentsPath)) {
+		try {
+			const text = readFileSync(agentsPath, "utf-8");
+			const parsed = parseYaml(text) as Record<string, unknown>;
+			if (parsed && typeof parsed === "object") {
+				raw = { ...parsed };
+			}
+		} catch (e) {
+			console.error(`[permissions] Warning: Could not parse ${agentsPath}:`, e);
+		}
+	}
+
+	// Load global config (merged with agent-wide defaults)
 	if (existsSync(globalPath)) {
 		try {
 			const text = readFileSync(globalPath, "utf-8");
 			const parsed = parseYaml(text) as Record<string, unknown>;
 			if (parsed && typeof parsed === "object") {
-				raw = { ...parsed };
+				raw = {
+					...raw,
+					...parsed,
+					rules: [
+						...(Array.isArray(raw.rules) ? raw.rules : []),
+						...(Array.isArray(parsed.rules) ? parsed.rules : []),
+					],
+					hidden_tools: [
+						...(Array.isArray(raw.hidden_tools) ? raw.hidden_tools : []),
+						...(Array.isArray(parsed.hidden_tools) ? parsed.hidden_tools : []),
+					],
+				};
 			}
 		} catch (e) {
 			console.error(`[permissions] Warning: Could not parse ${globalPath}:`, e);
