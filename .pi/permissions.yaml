@@ -1,0 +1,21 @@
+version: 1
+# Default sandbox: allow all tools within the current working directory,
+# block them outside of it, and require confirmation for shell commands.
+
+rules:
+  # ─── Shell commands always require manual approval ────────────────────────
+  - name: "Confirm bash commands"
+    condition: 'tool == "bash"'
+    action: confirm
+    message: "Shell commands require manual approval"
+
+  # ─── Allow any operation within the current working directory ────────────
+  - name: "Allow within project"
+    condition: 'path.startsWith(cwd)'
+    action: allow
+
+  # ─── Block everything that reaches this point ──────────────────────────────
+  - name: "Block outside project"
+    condition: 'true'
+    action: block
+    message: "Operations outside the project directory are blocked"

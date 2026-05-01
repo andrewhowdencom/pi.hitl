@@ -1,160 +1,420 @@
 /**
- * pi.hitl — Human-in-the-Loop Tool Approval
+ * pi.hitl — CEL-based Permission System
  *
- * Ensures every tool call requires explicit user approval before execution.
- * In non-interactive modes (print, JSON, RPC), all tool calls are blocked
- * by default since no UI is available for confirmation.
+ * Rule-based tool approval using CEL (Common Expression Language) and YAML
+ * configuration. Allows autonomous tool execution within a defined sandbox
+ * while requiring approval (or blocking) for operations outside it.
+ *
+ * Configuration files (merged, project takes precedence):
+ *   ~/.pi/agent/permissions.yaml    (global)
+ *   .pi/permissions.yaml            (project-local)
+ *
+ * Each rule has a CEL `condition`, an `action` (allow / block / confirm),
+ * and an optional `message` shown when blocking.
+ *
+ * Built-in CEL variables:
+ *   tool      — tool name (string)
+ *   args      — tool arguments map
+ *   cwd       — current working directory (absolute path)
+ *   command   — bash command string (bash tool only)
+ *   path      — resolved absolute path for file-based tools; "" for bash
+ *
+ * Built-in CEL functions:
+ *   path.startsWith(prefix)  — string prefix check
+ *   path.contains(substr)    — substring check
+ *   str.matches(pattern)     — regex match (custom function)
  *
  * Commands:
- *   /hitl              — Toggle tool approval on/off
- *   /hitl on           — Enable approval gate
- *   /hitl off          — Disable approval gate
- *   /hitl status       — Show current state
+ *   /permissions             — Show current rules
+ *   /permissions reload      — Reload config from disk
+ *   /permissions on          — Enable permission checks
+ *   /permissions off         — Disable permission checks (allow all)
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { run, isCelError, celFunc, CelScalar, parse as parseCel } from "@bufbuild/cel";
+import { parse as parseYaml } from "yaml";
+import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { getAgentDir } from "@mariozechner/pi-coding-agent";
 
-interface HitlState {
+type Action = "allow" | "block" | "confirm";
+
+interface Rule {
+	name: string;
+	condition: string;
+	action: Action;
+	message?: string;
+}
+
+interface Config {
+	version: number;
+	default_action: Action;
+	rules: Rule[];
+	hidden_tools: string[];
+}
+
+interface PermissionsState {
 	enabled: boolean;
 }
 
+// ─── CEL setup ──────────────────────────────────────────────────────────────
+
+/** Custom CEL function: regex matching. Usage: `command.matches("rm\\s+-rf")` */
+const matchesFunc = celFunc(
+	"matches",
+	[CelScalar.STRING, CelScalar.STRING],
+	CelScalar.BOOL,
+	(str: string, pattern: string) => new RegExp(pattern).test(str),
+);
+
+const CEL_OPTIONS = { funcs: [matchesFunc] };
+
+// ─── Config loading ─────────────────────────────────────────────────────────
+
+function loadConfig(cwd: string): Config | undefined {
+	const globalPath = resolve(getAgentDir(), "permissions.yaml");
+	const projectPath = resolve(cwd, ".pi", "permissions.yaml");
+
+	let raw: Record<string, unknown> = {};
+
+	// Load global config
+	if (existsSync(globalPath)) {
+		try {
+			const text = readFileSync(globalPath, "utf-8");
+			const parsed = parseYaml(text) as Record<string, unknown>;
+			if (parsed && typeof parsed === "object") {
+				raw = { ...parsed };
+			}
+		} catch (e) {
+			console.error(`[permissions] Warning: Could not parse ${globalPath}:`, e);
+		}
+	}
+
+	// Load and merge project config (project overrides global)
+	if (existsSync(projectPath)) {
+		try {
+			const text = readFileSync(projectPath, "utf-8");
+			const parsed = parseYaml(text) as Record<string, unknown>;
+			if (parsed && typeof parsed === "object") {
+				raw = {
+					...raw,
+					...parsed,
+					rules: [
+						...(Array.isArray(raw.rules) ? raw.rules : []),
+						...(Array.isArray(parsed.rules) ? parsed.rules : []),
+					],
+					hidden_tools: [
+						...(Array.isArray(raw.hidden_tools) ? raw.hidden_tools : []),
+						...(Array.isArray(parsed.hidden_tools) ? parsed.hidden_tools : []),
+					],
+				};
+			}
+		} catch (e) {
+			console.error(`[permissions] Warning: Could not parse ${projectPath}:`, e);
+		}
+	}
+
+	const rawRules = Array.isArray(raw.rules) ? raw.rules : [];
+	if (rawRules.length === 0 && !Array.isArray(raw.hidden_tools)) {
+		return undefined; // No config found — extension is inactive
+	}
+
+	// Validate and parse rules
+	const rules: Rule[] = [];
+	for (const entry of rawRules) {
+		if (!entry || typeof entry !== "object") continue;
+
+		const name = String((entry as Record<string, unknown>).name ?? "");
+		const condition = String((entry as Record<string, unknown>).condition ?? "");
+		const action = String((entry as Record<string, unknown>).action ?? "") as Action;
+		const message = (entry as Record<string, unknown>).message
+			? String((entry as Record<string, unknown>).message)
+			: undefined;
+
+		if (!name || !condition || !action) {
+			console.error(`[permissions] Warning: Invalid rule (missing name, condition, or action):`, entry);
+			continue;
+		}
+
+		if (!["allow", "block", "confirm"].includes(action)) {
+			console.error(`[permissions] Warning: Invalid action "${action}" in rule "${name}"`);
+			continue;
+		}
+
+		// Validate CEL syntax eagerly so broken rules fail at load time
+		try {
+			parseCel(condition);
+		} catch (e) {
+			console.error(`[permissions] Warning: Invalid CEL expression in rule "${name}":`, e);
+			continue;
+		}
+
+		rules.push({ name, condition, action, message });
+	}
+
+	const hidden_tools = Array.isArray(raw.hidden_tools)
+		? [...new Set(raw.hidden_tools.map(String))]
+		: [];
+
+	let default_action = (raw.default_action as Action) ?? "block";
+	if (!["allow", "block", "confirm"].includes(default_action)) {
+		console.error(`[permissions] Warning: Invalid default_action "${default_action}", using "block"`);
+		default_action = "block";
+	}
+
+	return {
+		version: Number(raw.version ?? 1),
+		default_action,
+		rules,
+		hidden_tools,
+	};
+}
+
+// ─── CEL context builder ────────────────────────────────────────────────────
+
+function buildContext(toolName: string, input: unknown, cwd: string): Record<string, unknown> {
+	const args = input as Record<string, unknown>;
+	const absCwd = resolve(cwd);
+	const ctx: Record<string, unknown> = {
+		tool: toolName,
+		args,
+		cwd: absCwd,
+	};
+
+	// command: available for bash tool
+	if (toolName === "bash") {
+		ctx.command = String(args.command ?? "");
+	}
+
+	// path: resolved absolute path for file-based tools; empty for bash / custom tools
+	if (typeof args.path === "string") {
+		ctx.path = resolve(absCwd, args.path);
+	} else {
+		ctx.path = "";
+	}
+
+	return ctx;
+}
+
+// ─── Rule evaluation ──────────────────────────────────────────────────────
+
+function evaluateRule(rule: Rule, context: Record<string, unknown>): boolean {
+	try {
+		const result = run(rule.condition, context, CEL_OPTIONS);
+		if (isCelError(result)) {
+			console.error(`[permissions] CEL error in rule "${rule.name}":`, result);
+			return false;
+		}
+		return result === true;
+	} catch (e) {
+		console.error(`[permissions] Error evaluating rule "${rule.name}":`, e);
+		return false;
+	}
+}
+
+// ─── Extension ──────────────────────────────────────────────────────────────
+
 export default function (pi: ExtensionAPI) {
+	let config: Config | undefined;
 	let enabled = true;
 	let deniedThisTurn = false;
 
-	// Restore state from session on startup / resume / reload / fork
+	function reloadConfig(cwd: string) {
+		config = loadConfig(cwd);
+	}
+
+	// Restore persisted state on session start / reload / resume / fork
 	pi.on("session_start", async (_event, ctx) => {
 		deniedThisTurn = false;
 		for (const entry of ctx.sessionManager.getEntries()) {
-			if (entry.type === "custom" && entry.customType === "hitl-state") {
-				enabled = (entry.data as HitlState | undefined)?.enabled ?? true;
+			if (entry.type === "custom" && entry.customType === "permissions-state") {
+				const state = entry.data as PermissionsState | undefined;
+				if (state) enabled = state.enabled;
 			}
+		}
+		reloadConfig(ctx.cwd);
+		if (config) {
+			ctx.ui.notify(
+				`Permissions: ${config.rules.length} rule(s), ${config.hidden_tools.length} hidden tool(s)`,
+				"info",
+			);
 		}
 	});
 
-	// Reset per-turn state
+	// Reset per-turn denial tracking
 	pi.on("turn_start", async () => {
 		deniedThisTurn = false;
 	});
 
-	// Toggle command
-	pi.registerCommand("hitl", {
-		description: "Toggle Human-in-the-Loop tool approval (on/off/status)",
-		handler: async (args, ctx) => {
-			const arg = args.trim().toLowerCase();
+	// Inject sandbox boundary note into system prompt so the LLM knows its constraints
+	pi.on("before_agent_start", async (event, ctx) => {
+		if (!config || !enabled) return;
 
-			if (arg === "off" || arg === "disable" || arg === "false") {
-				enabled = false;
-			} else if (arg === "on" || arg === "enable" || arg === "true") {
-				enabled = true;
-			} else if (arg === "status") {
-				// nothing to flip
-			} else if (arg.length > 0) {
-				ctx.ui.notify(`Unknown argument: "${args}". Use on, off, or status.`, "warning");
-				return;
-			} else {
-				enabled = !enabled;
-			}
+		const lines = ["## Permission Sandbox"];
 
-			// Persist state in session
-			pi.appendEntry("hitl-state", { enabled });
+		if (config.rules.some((r) => r.condition.includes("path.startsWith(cwd)"))) {
+			lines.push(`- File operations are restricted to: ${ctx.cwd}`);
+		}
+		if (config.rules.some((r) => r.condition.includes('tool == "bash"'))) {
+			lines.push("- Shell commands require manual approval.");
+		}
+		if (config.hidden_tools.length > 0) {
+			lines.push(`- Hidden tools: ${config.hidden_tools.join(", ")}`);
+		}
 
-			const status = enabled
-				? "🔒 enabled — all tool calls require approval"
-				: "🔓 disabled — tool calls execute without approval";
-			ctx.ui.notify(`HITL ${status}`, enabled ? "info" : "warning");
-		},
+		if (lines.length === 1) return; // No relevant restrictions to note
+
+		return {
+			systemPrompt: event.systemPrompt + "\n\n" + lines.join("\n"),
+		};
 	});
 
 	// Main gate: intercept every tool call
 	pi.on("tool_call", async (event, ctx) => {
-		if (!enabled) return undefined;
+		if (!config || !enabled) return undefined;
 
-		// Non-interactive modes: block by default (no UI to confirm)
-		if (!ctx.hasUI) {
+		// Hidden tools are silently blocked
+		if (config.hidden_tools.includes(event.toolName)) {
 			return {
 				block: true,
-				reason:
-					"HITL: Tool calls require manual approval. Run pi in interactive mode or disable HITL with /hitl off",
+				reason: `Tool "${event.toolName}" is hidden by permissions configuration`,
 			};
 		}
 
-		const toolName = event.toolName;
-		const description = formatToolCall(toolName, event.input);
+		// Non-interactive modes: block confirm actions since no UI is available
+		if (!ctx.hasUI && config.rules.some((r) => r.action === "confirm")) {
+			// We'll still evaluate rules; if an allow rule matches, we permit it.
+			// Only confirm rules become block in non-interactive mode.
+		}
+
+		const context = buildContext(event.toolName, event.input, ctx.cwd);
 
 		// If user already denied a tool this turn, keep blocking subsequent tools
 		// so they don't get spammed with approval dialogs after saying no once.
 		if (deniedThisTurn) {
 			return {
 				block: true,
-				reason: "Blocked by HITL extension — a previous tool in this turn was denied",
+				reason: "Blocked by permissions extension — a previous tool in this turn was denied",
 			};
 		}
 
-		const ok = await ctx.ui.confirm(
-			`🔒 Approve Tool: ${toolName}`,
-			`${description}\n\nAllow this tool call to execute?`,
-		);
+		// Evaluate rules in order; first match wins
+		for (const rule of config.rules) {
+			if (evaluateRule(rule, context)) {
+				switch (rule.action) {
+					case "allow":
+						return undefined;
 
-		if (!ok) {
-			deniedThisTurn = true;
-			return { block: true, reason: "Blocked by user via HITL extension" };
-		}
+					case "block":
+						return {
+							block: true,
+							reason: rule.message ?? `Blocked by rule: ${rule.name}`,
+						};
 
-		return undefined;
-	});
-}
-
-function formatToolCall(toolName: string, input: unknown): string {
-	const args = input as Record<string, unknown>;
-
-	switch (toolName) {
-		case "read": {
-			let desc = `Path: ${String(args.path ?? "unknown")}`;
-			if (args.offset) desc += `\nOffset: ${args.offset}`;
-			if (args.limit) desc += `\nLimit: ${args.limit} lines`;
-			return desc;
-		}
-
-		case "bash": {
-			let desc = `Command:\n  ${String(args.command ?? "unknown")}`;
-			if (args.timeout) desc += `\nTimeout: ${args.timeout}s`;
-			return desc;
-		}
-
-		case "edit": {
-			const edits = (args.edits as Array<Record<string, unknown>> | undefined) ?? [];
-			return `Path: ${String(args.path ?? "unknown")}\nEdit blocks: ${edits.length}`;
-		}
-
-		case "write": {
-			const content = args.content as string | undefined;
-			const lines = content?.split("\n").length ?? 0;
-			return `Path: ${String(args.path ?? "unknown")}\nContent: ${lines} line(s)`;
-		}
-
-		case "grep": {
-			return `Pattern: ${String(args.pattern ?? "unknown")}\nPath: ${String(args.path ?? "unknown")}`;
-		}
-
-		case "find": {
-			let desc = `Path: ${String(args.path ?? "unknown")}`;
-			if (args.name) desc += `\nName pattern: ${args.name}`;
-			if (args.type) desc += `\nType: ${args.type}`;
-			return desc;
-		}
-
-		case "ls": {
-			return `Path: ${String(args.path ?? "unknown")}`;
-		}
-
-		default: {
-			// Custom tool or unknown — show compact JSON preview
-			const json = JSON.stringify(input, null, 2);
-			if (json.length > 500) {
-				return `Arguments:\n${json.slice(0, 500)}\n... (${json.length - 500} more characters)`;
+					case "confirm": {
+						if (!ctx.hasUI) {
+							return {
+								block: true,
+								reason:
+									rule.message ??
+									`Confirmation required for rule "${rule.name}" (no UI available)`,
+							};
+						}
+						const ok = await ctx.ui.confirm(
+							`🔒 Permission Rule: ${rule.name}`,
+							`${rule.message ?? "This operation requires approval."}\n\nTool: ${event.toolName}\n\nAllow this tool call to execute?`,
+						);
+						if (!ok) {
+							deniedThisTurn = true;
+							return { block: true, reason: `Blocked by user (rule: ${rule.name})` };
+						}
+						return undefined;
+					}
+				}
 			}
-			return `Arguments:\n${json}`;
 		}
-	}
+
+		// No rule matched — apply default action
+		if (config.default_action === "block") {
+			return {
+				block: true,
+				reason: "Blocked by default — no matching permission rule",
+			};
+		}
+		if (config.default_action === "confirm") {
+			if (!ctx.hasUI) {
+				return {
+					block: true,
+					reason: "Confirmation required by default (no UI available)",
+				};
+			}
+			const ok = await ctx.ui.confirm(
+				`🔒 Permission Check`,
+				`No rule matched for tool "${event.toolName}". Allow?`,
+			);
+			if (!ok) {
+				deniedThisTurn = true;
+				return { block: true, reason: "Blocked by user (default action)" };
+			}
+			return undefined;
+		}
+
+		return undefined; // default_action === "allow"
+	});
+
+	// ─── Commands ─────────────────────────────────────────────────────────────
+
+	pi.registerCommand("permissions", {
+		description: "Show, reload, or toggle permission rules",
+		handler: async (args, ctx) => {
+			const arg = args.trim().toLowerCase();
+
+			if (arg === "off" || arg === "disable" || arg === "false") {
+				enabled = false;
+				pi.appendEntry("permissions-state", { enabled: false });
+				ctx.ui.notify("Permissions disabled — all tool calls allowed", "warning");
+				return;
+			}
+
+			if (arg === "on" || arg === "enable" || arg === "true") {
+				enabled = true;
+				pi.appendEntry("permissions-state", { enabled: true });
+				ctx.ui.notify("Permissions enabled — rules are active", "info");
+				return;
+			}
+
+			if (arg === "reload") {
+				reloadConfig(ctx.cwd);
+				const msg = config
+					? `Permissions reloaded: ${config.rules.length} rule(s), ${config.hidden_tools.length} hidden tool(s)`
+					: "Permissions reloaded: no config found";
+				ctx.ui.notify(msg, config ? "info" : "warning");
+				return;
+			}
+
+			if (arg === "status" || arg === "") {
+				if (!config) {
+					ctx.ui.notify("No permissions config loaded", "warning");
+					return;
+				}
+
+				const lines = [
+					`Permissions Config (${config.rules.length} rules, ${config.hidden_tools.length} hidden tools):`,
+					`Status: ${enabled ? "enabled" : "disabled"}`,
+					`Default action: ${config.default_action}`,
+					"",
+					"Rules:",
+					...config.rules.map((r, i) => `  ${i + 1}. [${r.action}] ${r.name}: ${r.condition}`),
+				];
+				if (config.hidden_tools.length > 0) {
+					lines.push("", `Hidden tools: ${config.hidden_tools.join(", ")}`);
+				}
+				ctx.ui.notify(lines.join("\n"), "info");
+				return;
+			}
+
+			ctx.ui.notify(`Unknown argument: "${args}". Use reload, on, off, or status.`, "warning");
+		},
+	});
 }

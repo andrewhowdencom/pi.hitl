@@ -1,14 +1,25 @@
 {
   "name": "pi.hitl",
-  "version": "0.1.0",
-  "description": "Human-in-the-Loop tool approval for the pi coding agent",
-  "keywords": ["pi-package"],
+  "version": "0.2.0",
+  "description": "CEL-based permission sandbox for the pi coding agent",
+  "keywords": [
+    "pi-package"
+  ],
   "license": "MIT",
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
     "typebox": "*"
+  },
+  "dependencies": {
+    "@bufbuild/cel": "^0.4.0",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
   }
 }
