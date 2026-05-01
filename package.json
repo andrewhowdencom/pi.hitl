@@ -1,0 +1,14 @@
+{
+  "name": "pi.hitl",
+  "version": "0.1.0",
+  "description": "Human-in-the-Loop tool approval for the pi coding agent",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}

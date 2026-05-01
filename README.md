@@ -6,20 +6,42 @@ This extension intercepts **every** tool call the LLM attempts and presents a co
 
 ## Installation
 
-### Global (all projects)
+### Via `pi install` (recommended)
+
+Install from git globally:
+
+```bash
+pi install git:github.com/andrewhowdencom/pi.hitl
+```
+
+Or install project-local:
+
+```bash
+pi install -l git:github.com/andrewhowdencom/pi.hitl
+```
+
+Pin to a specific version with a ref:
+
+```bash
+pi install git:github.com/andrewhowdencom/pi.hitl@v0.1.0
+```
+
+### Manual copy
+
+#### Global (all projects)
 
 ```bash
 cp index.ts ~/.pi/agent/extensions/hitl.ts
 ```
 
-### Project-local (current project only)
+#### Project-local (current project only)
 
 ```bash
 mkdir -p .pi/extensions
 cp index.ts .pi/extensions/hitl.ts
 ```
 
-### Quick test
+### Quick test (without installing)
 
 ```bash
 pi -e ./index.ts
