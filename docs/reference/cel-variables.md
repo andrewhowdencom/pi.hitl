@@ -11,6 +11,8 @@ This document lists all context variables and custom functions available in pi.h
 | `cwd` | `string` | Absolute current working directory of the session. |
 | `path` | `string` | Resolved absolute path for file-based tools (`read`, `write`, `edit`). Empty string (`""`) for `bash` and tools without a `path` argument. |
 | `command` | `string` | Bash command string. Available only when `tool == "bash"`. Empty string for all other tools. |
+| `tool_source` | `string` | Tool origin: `"builtin"`, `"sdk"`, the extension path that registered it, or `"unknown"`. |
+| `tool_scope` | `string` | Tool scope: `"user"`, `"project"`, `"temporary"`, or `"unknown"`. |
 
 ## Functions
 
@@ -30,3 +32,52 @@ All relative paths are resolved to **absolute paths** before CEL evaluation. Thi
 - `../other/file.ts` → resolves to `/home/user/other/file.ts` (will not match `cwd`)
 
 Path resolution uses `node:path.resolve(cwd, args.path)`. The `cwd` variable itself is also resolved to an absolute path.
+
+## Extension-Provided Variables
+
+Other pi extensions can inject their own variables into the CEL context by registering a **context builder** function. This lets permission rules reference extension-specific state — for example, the currently active agent, execution mode, or custom flags — without pi.hitl needing to import or know about those extensions.
+
+### Registration contract
+
+Extensions register a builder by emitting an event on the shared `pi.events` bus:
+
+```typescript
+pi.events.emit("hitl:register_context", {
+  name: "my_extension",
+  builder: (toolName, input, cwd, ctx) => ({ my_var: 42 }),
+});
+```
+
+The builder receives the same arguments pi.hitl uses for its base context:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `toolName` | `string` | Name of the tool being evaluated. |
+| `input` | `unknown` | The tool's input arguments. |
+| `cwd` | `string` | Current working directory (absolute). |
+| `ctx` | `ExtensionContext` | Full pi extension context (session manager, UI, etc.). |
+
+The builder returns a plain object whose keys are merged into the CEL context. Return values may be synchronous or asynchronous (a `Promise` that resolves to the object).
+
+### Announcement protocol
+
+Because extensions load in an unpredictable order, pi.hitl may start listening **after** another extension has already emitted its registration. To handle this, pi.hitl emits `hitl:announce` during every `session_start`. Extensions that loaded earlier should listen for this event and re-emit their registration:
+
+```typescript
+pi.events.on("hitl:announce", () => {
+  pi.events.emit("hitl:register_context", {
+    name: "my_extension",
+    builder: (toolName, input, cwd, ctx) => ({ my_var: 42 }),
+  });
+});
+```
+
+Emitting in **both** places (proactively at startup and reactively on `hitl:announce`) ensures the registration is captured regardless of load order.
+
+### Builder error isolation
+
+If a builder throws an exception, pi.hitl logs the error (including the builder's name) and continues evaluating the remaining builders and rules. A failing builder does not break the permission gate for that tool call.
+
+### Key override rules
+
+When multiple builders return the same key, **later builders override earlier ones**. Built-in variables (`tool`, `args`, `cwd`, `path`, `command`, `tool_source`, `tool_scope`) are set before any extension builders run, so an extension builder can override them if needed. Extension authors should use **namespaced keys** (e.g., `myext_foo`) to avoid accidental collisions.

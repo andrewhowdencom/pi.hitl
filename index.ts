@@ -19,6 +19,8 @@
  *   cwd       — current working directory (absolute path)
  *   command   — bash command string (bash tool only)
  *   path      — resolved absolute path for file-based tools; "" for bash
+ *   tool_source — tool origin (builtin, sdk, extension path, or unknown)
+ *   tool_scope  — tool scope (user, project, temporary, or unknown)
  *
  * Built-in CEL functions:
  *   path.startsWith(prefix)  — string prefix check
@@ -40,6 +42,12 @@ import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import { type Action, type Rule, type Config, flattenRules, mergeRules } from "./rules.ts";
+import {
+	createContextBuilderRegistry,
+	createToolMetadataCache,
+	buildBaseContext,
+	type ContextBuilderRegistration,
+} from "./context.ts";
 
 interface PermissionsState {
 	enabled: boolean;
@@ -153,31 +161,7 @@ function loadConfig(cwd: string): Config | undefined {
 	};
 }
 
-// ─── CEL context builder ────────────────────────────────────────────────────
 
-function buildContext(toolName: string, input: unknown, cwd: string): Record<string, unknown> {
-	const args = input as Record<string, unknown>;
-	const absCwd = resolve(cwd);
-	const ctx: Record<string, unknown> = {
-		tool: toolName,
-		args,
-		cwd: absCwd,
-	};
-
-	// command: available for bash tool
-	if (toolName === "bash") {
-		ctx.command = String(args.command ?? "");
-	}
-
-	// path: resolved absolute path for file-based tools; empty for bash / custom tools
-	if (typeof args.path === "string") {
-		ctx.path = resolve(absCwd, args.path);
-	} else {
-		ctx.path = "";
-	}
-
-	return ctx;
-}
 
 // ─── Rule evaluation ──────────────────────────────────────────────────────
 
@@ -202,6 +186,15 @@ export default function (pi: ExtensionAPI) {
 	let enabled = true;
 	let deniedThisTurn = false;
 
+	const contextBuilders = createContextBuilderRegistry();
+	const toolMetaCache = createToolMetadataCache();
+
+	// Listen for context builder registrations from other extensions
+	pi.events.on("hitl:register_context", (reg: unknown) => {
+		const { name, builder } = reg as ContextBuilderRegistration;
+		contextBuilders.register(name, builder);
+	});
+
 	function reloadConfig(cwd: string) {
 		config = loadConfig(cwd);
 	}
@@ -216,6 +209,12 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 		reloadConfig(ctx.cwd);
+		try {
+			toolMetaCache.refresh(pi.getAllTools());
+		} catch {
+			// pi.getAllTools() may not be available in all pi versions; skip silently
+		}
+		pi.events.emit("hitl:announce", {});
 		if (config) {
 			ctx.ui.notify(
 				`Permissions: ${config.rules.length} rule(s), ${config.hidden_tools.length} hidden tool(s)`,
@@ -240,6 +239,12 @@ export default function (pi: ExtensionAPI) {
 		}
 		if (config.rules.some((r) => r.condition.includes('tool == "bash"'))) {
 			lines.push("- Shell commands require manual approval.");
+		}
+		if (config.rules.some((r) => r.condition.includes("tool_source"))) {
+			lines.push("- Tool availability is restricted by origin.");
+		}
+		if (config.rules.some((r) => r.condition.includes("tool_scope"))) {
+			lines.push("- Tool availability is restricted by scope.");
 		}
 		if (config.hidden_tools.length > 0) {
 			lines.push(`- Hidden tools: ${config.hidden_tools.join(", ")}`);
@@ -270,7 +275,19 @@ export default function (pi: ExtensionAPI) {
 			// Only confirm rules become block in non-interactive mode.
 		}
 
-		const context = buildContext(event.toolName, event.input, ctx.cwd);
+		const baseContext = buildBaseContext(event.toolName, event.input, ctx.cwd);
+		const meta = toolMetaCache.get(event.toolName);
+		if (meta) {
+			baseContext.tool_source = meta.source;
+			baseContext.tool_scope = meta.scope;
+		}
+		const context = await contextBuilders.build(
+			event.toolName,
+			event.input,
+			ctx.cwd,
+			ctx,
+			baseContext,
+		);
 
 		// If user already denied a tool this turn, keep blocking subsequent tools
 		// so they don't get spammed with approval dialogs after saying no once.
