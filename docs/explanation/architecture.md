@@ -10,7 +10,7 @@ pi.hitl supports three config locations — agent-wide defaults, global per-user
 - **Global config** (`~/.pi/agent/permissions.yaml`) lets a user define personal preferences that apply to every project they work on.
 - **Project-local config** (`.pi/permissions.yaml`) lets a repository encode its own security policy, which overrides the user's global settings.
 
-Project-local takes highest precedence because a repository's security requirements should not be silently overridden by a user's personal defaults. The merge concatenates `rules` and `hidden_tools` rather than replacing them, so a project's rules are appended to global rules and evaluated after them. This means a global allow-rule can still short-circuit before a project block-rule if it matches first.
+Project-local takes highest precedence because a repository's security requirements should not be silently overridden by a user's personal defaults. `rules` are **merged** across configs: parent rules with matching `name` and `condition` have their children combined into a single group, so a project config can extend a global bash allowlist with additional allowed commands. Non-matching parents and leaf rules are appended. `hidden_tools` are concatenated and deduplicated. This means a global allow-rule can still short-circuit before a project block-rule if it matches first, but project-specific additions to a shared parent group are evaluated before the group's catch-all default.
 
 ## System prompt injection
 

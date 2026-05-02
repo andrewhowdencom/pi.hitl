@@ -28,6 +28,10 @@ export interface Config {
  *   parent: "Bash"
  *   child:  "rm"
  *   flat:   "Bash > rm"
+ *
+ * Leaf rules may be written with a `default: <action>` shorthand, which
+ * expands to `name: "Default"`, `condition: "true"`, `action: <action>`.
+ * Explicit `name`, `condition`, or `action` override the inferred values.
  */
 export function flattenRules(
 	rawRules: unknown[],
@@ -40,11 +44,44 @@ export function flattenRules(
 		if (!entry || typeof entry !== "object") continue;
 
 		const raw = entry as Record<string, unknown>;
-		const name = String(raw.name ?? "");
-		const condition = String(raw.condition ?? "");
+		let name = String(raw.name ?? "");
+		let condition = String(raw.condition ?? "");
 		const message = raw.message ? String(raw.message) : undefined;
-		const action = raw.action ? (String(raw.action) as Action) : undefined;
+		let action = raw.action ? (String(raw.action) as Action) : undefined;
 		const nested = Array.isArray(raw.rules) ? raw.rules : undefined;
+
+		// Handle default shorthand
+		if (raw.default !== undefined) {
+			if (nested) {
+				console.error(
+					`[permissions] Warning: Rule "${name || "unnamed"}" has both "default" and nested rules; ignoring "default"`,
+				);
+			} else {
+				const defaultValue = String(raw.default);
+				if (!["allow", "block", "confirm"].includes(defaultValue)) {
+					console.error(
+						`[permissions] Warning: Invalid default action "${defaultValue}":`,
+						entry,
+					);
+					continue;
+				}
+
+				if (raw.action !== undefined) {
+					console.error(
+						`[permissions] Warning: Rule has both "default" and explicit "action"; using explicit "action"`,
+					);
+				}
+				if (raw.condition !== undefined) {
+					console.error(
+						`[permissions] Warning: Rule has both "default" and explicit "condition"; using explicit "condition"`,
+					);
+				}
+
+				action = (action as Action) || (defaultValue as Action);
+				condition = condition || "true";
+				name = name || "Default";
+			}
+		}
 
 		if (!name || !condition) {
 			console.error(
@@ -103,4 +140,97 @@ export function flattenRules(
 	}
 
 	return rules;
+}
+
+/**
+ * Reorder children so that catch-all rules (those with a `default` key or a
+ * `condition` of `"true"`) appear at the end, preserving relative order among
+ * specific rules and among catch-all rules.
+ */
+function reorderChildren(children: unknown[]): unknown[] {
+	const specific: unknown[] = [];
+	const defaults: unknown[] = [];
+
+	for (const child of children) {
+		if (!child || typeof child !== "object") {
+			specific.push(child);
+			continue;
+		}
+		const raw = child as Record<string, unknown>;
+		// Only leaf rules can be catch-alls
+		if (Array.isArray(raw.rules)) {
+			specific.push(child);
+			continue;
+		}
+		if (raw.default !== undefined || String(raw.condition ?? "") === "true") {
+			defaults.push(child);
+		} else {
+			specific.push(child);
+		}
+	}
+
+	return [...specific, ...defaults];
+}
+
+/**
+ * Recursively merge two rule arrays. Parent rules with matching `name` and
+ * `condition` have their children merged. Within merged parents, catch-all
+ * children (those with a `default` key or `condition === "true"`) are
+ * reordered to the end so specific rules are evaluated first.
+ */
+export function mergeRules(base: unknown[], override: unknown[]): unknown[] {
+	const result: unknown[] = [...base];
+
+	for (const entry of override) {
+		if (!entry || typeof entry !== "object") {
+			console.error(
+				`[permissions] Warning: Invalid rule (not an object):`,
+				entry,
+			);
+			continue;
+		}
+
+		const raw = entry as Record<string, unknown>;
+		const name = String(raw.name ?? "");
+		const condition = String(raw.condition ?? "");
+		const nested = Array.isArray(raw.rules) ? raw.rules : undefined;
+
+		if (!name || !condition) {
+			console.error(
+				`[permissions] Warning: Invalid rule (missing name or condition):`,
+				entry,
+			);
+			continue;
+		}
+
+		if (nested) {
+			// Parent rule — try to merge with existing parent
+			const matchIndex = result.findIndex((r) => {
+				if (!r || typeof r !== "object") return false;
+				const existing = r as Record<string, unknown>;
+				return (
+					String(existing.name ?? "") === name &&
+					String(existing.condition ?? "") === condition &&
+					Array.isArray(existing.rules)
+				);
+			});
+
+			if (matchIndex !== -1) {
+				const existing = result[matchIndex] as Record<string, unknown>;
+				const existingChildren = Array.isArray(existing.rules)
+					? existing.rules
+					: [];
+				const mergedChildren = reorderChildren(
+					mergeRules(existingChildren, nested),
+				);
+				existing.rules = mergedChildren;
+				continue;
+			}
+		}
+
+		// No merge match or leaf rule — append
+		result.push(entry);
+	}
+
+	return result;
 }

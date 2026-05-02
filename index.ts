@@ -39,7 +39,7 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
-import { type Action, type Rule, type Config, flattenRules } from "./rules.ts";
+import { type Action, type Rule, type Config, flattenRules, mergeRules } from "./rules.ts";
 
 interface PermissionsState {
 	enabled: boolean;
@@ -88,10 +88,10 @@ function loadConfig(cwd: string): Config | undefined {
 				raw = {
 					...raw,
 					...parsed,
-					rules: [
-						...(Array.isArray(raw.rules) ? raw.rules : []),
-						...(Array.isArray(parsed.rules) ? parsed.rules : []),
-					],
+					rules: mergeRules(
+						Array.isArray(raw.rules) ? raw.rules : [],
+						Array.isArray(parsed.rules) ? parsed.rules : [],
+					),
 					hidden_tools: [
 						...(Array.isArray(raw.hidden_tools) ? raw.hidden_tools : []),
 						...(Array.isArray(parsed.hidden_tools) ? parsed.hidden_tools : []),
@@ -112,10 +112,10 @@ function loadConfig(cwd: string): Config | undefined {
 				raw = {
 					...raw,
 					...parsed,
-					rules: [
-						...(Array.isArray(raw.rules) ? raw.rules : []),
-						...(Array.isArray(parsed.rules) ? parsed.rules : []),
-					],
+					rules: mergeRules(
+						Array.isArray(raw.rules) ? raw.rules : [],
+						Array.isArray(parsed.rules) ? parsed.rules : [],
+					),
 					hidden_tools: [
 						...(Array.isArray(raw.hidden_tools) ? raw.hidden_tools : []),
 						...(Array.isArray(parsed.hidden_tools) ? parsed.hidden_tools : []),

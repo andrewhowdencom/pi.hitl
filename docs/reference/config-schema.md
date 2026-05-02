@@ -20,6 +20,7 @@ This document describes the structure of `permissions.yaml` configuration files.
 | `action` | `string` | Yes (leaf) | One of: `allow`, `block`, `confirm`. |
 | `message` | `string` | No | Message shown when the rule blocks or confirms. |
 | `rules` | `Rule[]` | No (parent) | Child rules. Mutually exclusive with `action`. Parent conditions are AND-ed with children. |
+| `default` | `string` | No (leaf alt) | Shorthand for a catch-all leaf rule. Sets `action` to the value, `condition` to `"true"`, and `name` to `"Default"`. Explicit `name`, `condition`, or `action` override the inferred values. Mutually exclusive with `rules`. |
 
 A rule with `rules` is a **parent** — it has no `action` and its `condition` is prepended to every child's condition. A rule with `action` is a **leaf** and must not have `rules`.
 
@@ -33,7 +34,9 @@ A rule with `rules` is a **parent** — it has no `action` and its `condition` i
 
 **Merge semantics:**
 - Project-local overrides global, which overrides agent-wide defaults.
-- `rules` and `hidden_tools` are **concatenated** (not replaced). Project-local rules appear after global rules in the evaluated list.
+- `rules` are **merged** across configs: parent rules with matching `name` and `condition` have their children combined into a single parent group. Non-matching parents and leaf rules are appended. This allows a project config to extend a global allowlist without duplicating the entire parent group.
+- Within merged parent groups, specific children are evaluated before catch-all children (those with `default` or legacy `condition: "true"`).
+- `hidden_tools` are **concatenated** and deduplicated (not replaced).
 - All other keys (`version`, `default_action`) are overwritten by the highest-precedence config that defines them.
 
 ## Nested rules
@@ -46,7 +49,7 @@ At load time, nested rules are **flattened** into a single ordered list:
 - The parent's `name` is **prefixed** onto each child's name (e.g., `Bash > rm`).
 - The runtime engine evaluates the flat list top-to-bottom, first match wins.
 
-Include an explicit `condition: 'true'` catch-all as the last child to define a group default.
+Include an explicit `default: <action>` as the last child to define a group default. The legacy `condition: 'true'` form is also supported.
 
 ## Examples
 
@@ -96,8 +99,42 @@ rules:
         condition: 'command.contains("rm") || command.contains("sudo")'
         action: block
         message: "Destructive shell commands are blocked"
-      - name: "Confirm other bash"
-        condition: 'true'
-        action: confirm
+      - default: confirm
         message: "Shell commands require manual approval"
 ```
+
+### Extending a global bash allowlist from a project config
+
+When a global config defines a parent rule group, a project config can add more allowed commands by declaring the same parent `name` and `condition`. The children are merged, and catch-all rules are automatically reordered to the end.
+
+**Global `~/.pi/agent/permissions.yaml`:**
+
+```yaml
+rules:
+  - name: "Bash"
+    condition: 'tool == "bash"'
+    rules:
+      - name: "Allow safe commands"
+        condition: 'command.matches("^(ls|grep|git\\s+status)\\b")'
+        action: allow
+      - default: confirm
+        message: "Shell commands require manual approval"
+```
+
+**Project `.pi/permissions.yaml`:**
+
+```yaml
+rules:
+  - name: "Bash"
+    condition: 'tool == "bash"'
+    rules:
+      - name: "Allow find"
+        condition: 'command.startsWith("find")'
+        action: allow
+```
+
+After merging, the `Bash` group evaluates in this order:
+
+1. Allow safe commands (from global)
+2. Allow find (from project)
+3. Confirm other bash (global catch-all, reordered to end)

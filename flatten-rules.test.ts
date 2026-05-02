@@ -234,4 +234,93 @@ describe("flattenRules", () => {
 		assert.strictEqual(result[0].name, "Valid");
 		assert.ok(logs.some((l) => l.includes("Invalid rule")));
 	});
+
+	it("expands default: allow to a full rule", () => {
+		const { result, logs } = captureStderr(() =>
+			flattenRules([{ default: "allow" }]),
+		);
+		assert.strictEqual(result.length, 1);
+		assert.strictEqual(result[0].name, "Default");
+		assert.strictEqual(result[0].condition, "true");
+		assert.strictEqual(result[0].action, "allow");
+		assert.strictEqual(logs.length, 0);
+	});
+
+	it("uses explicit name over auto-generated Default", () => {
+		const { result, logs } = captureStderr(() =>
+			flattenRules([{ name: "Catch-all", default: "confirm" }]),
+		);
+		assert.strictEqual(result.length, 1);
+		assert.strictEqual(result[0].name, "Catch-all");
+		assert.strictEqual(result[0].condition, "true");
+		assert.strictEqual(result[0].action, "confirm");
+		assert.strictEqual(logs.length, 0);
+	});
+
+	it("warns and uses explicit condition when default and condition conflict", () => {
+		const { result, logs } = captureStderr(() =>
+			flattenRules([
+				{ default: "confirm", condition: 'tool == "bash"' },
+			]),
+		);
+		assert.strictEqual(result.length, 1);
+		assert.strictEqual(result[0].name, "Default");
+		assert.strictEqual(result[0].condition, 'tool == "bash"');
+		assert.strictEqual(result[0].action, "confirm");
+		assert.ok(logs.some((l) => l.includes('both "default" and explicit "condition"')));
+	});
+
+	it("warns and uses explicit action when default and action conflict", () => {
+		const { result, logs } = captureStderr(() =>
+			flattenRules([
+				{ default: "confirm", action: "block" },
+			]),
+		);
+		assert.strictEqual(result.length, 1);
+		assert.strictEqual(result[0].name, "Default");
+		assert.strictEqual(result[0].condition, "true");
+		assert.strictEqual(result[0].action, "block");
+		assert.ok(logs.some((l) => l.includes('both "default" and explicit "action"')));
+	});
+
+	it("warns and ignores default on parent rules", () => {
+		const { result, logs } = captureStderr(() =>
+			flattenRules([
+				{
+					name: "Bash",
+					condition: 'tool == "bash"',
+					default: "confirm",
+					rules: [{ name: "ls", condition: 'command.startsWith("ls")', action: "allow" }],
+				},
+			]),
+		);
+		assert.strictEqual(result.length, 1);
+		assert.strictEqual(result[0].name, "Bash > ls");
+		assert.ok(logs.some((l) => l.includes('both "default" and nested rules')));
+	});
+
+	it("skips invalid default value and logs a warning", () => {
+		const { result, logs } = captureStderr(() =>
+			flattenRules([{ default: "explode" }]),
+		);
+		assert.strictEqual(result.length, 0);
+		assert.ok(logs.some((l) => l.includes('Invalid default action "explode"')));
+	});
+
+	it("expands nested default inside a parent", () => {
+		const { result, logs } = captureStderr(() =>
+			flattenRules([
+				{
+					name: "Bash",
+					condition: 'tool == "bash"',
+					rules: [{ default: "confirm" }],
+				},
+			]),
+		);
+		assert.strictEqual(result.length, 1);
+		assert.strictEqual(result[0].name, "Bash > Default");
+		assert.strictEqual(result[0].condition, '(tool == "bash") && (true)');
+		assert.strictEqual(result[0].action, "confirm");
+		assert.strictEqual(logs.length, 0);
+	});
 });
