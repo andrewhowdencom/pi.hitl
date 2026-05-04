@@ -41,8 +41,7 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
-import { type Action, type Rule, type Config, flattenRules, mergeRules, parseTimeout } from "./rules.ts";
-import { confirmWithTimeout } from "./confirm.ts";
+import { type Action, type Rule, type Config, flattenRules, mergeRules } from "./rules.ts";
 import {
 	createContextBuilderRegistry,
 	createToolMetadataCache,
@@ -154,16 +153,9 @@ function loadConfig(cwd: string): Config | undefined {
 		default_action = "block";
 	}
 
-	const parsedTimeout = parseTimeout(raw.timeout);
-	if (parsedTimeout.warning) {
-		console.error(`[permissions] Warning: ${parsedTimeout.warning}`);
-	}
-	const timeout = parsedTimeout.value;
-
 	return {
 		version: Number(raw.version ?? 1),
 		default_action,
-		timeout,
 		rules,
 		hidden_tools,
 	};
@@ -328,20 +320,12 @@ export default function (pi: ExtensionAPI) {
 									`Confirmation required for rule "${rule.name}" (no UI available)`,
 							};
 						}
-						const result = await confirmWithTimeout(
-							ctx.ui,
+						const ok = await ctx.ui.confirm(
 							`🔒 Permission Rule: ${rule.name}`,
 							`${rule.message ?? "This operation requires approval."}\n\nTool: ${event.toolName}\n\nArgs:\n${JSON.stringify(event.input, null, 2)}\n\nAllow this tool call to execute?`,
-							config.timeout,
 						);
-						if (!result.allowed) {
+						if (!ok) {
 							deniedThisTurn = true;
-							if (result.timedOut) {
-								return {
-									block: true,
-									reason: rule.message ?? `Confirmation timed out (rule: ${rule.name})`,
-								};
-							}
 							let guidance = "";
 							const input = await ctx.ui.editor(
 								"Permission denied — how should I adjust to get approval?",
@@ -372,20 +356,12 @@ export default function (pi: ExtensionAPI) {
 					reason: "Confirmation required by default (no UI available)",
 				};
 			}
-			const result = await confirmWithTimeout(
-				ctx.ui,
+			const ok = await ctx.ui.confirm(
 				`🔒 Permission Check`,
 				`No rule matched for tool "${event.toolName}".\n\nArgs:\n${JSON.stringify(event.input, null, 2)}\n\nAllow?`,
-				config.timeout,
 			);
-			if (!result.allowed) {
+			if (!ok) {
 				deniedThisTurn = true;
-				if (result.timedOut) {
-					return {
-						block: true,
-						reason: `Confirmation timed out (default action)`,
-					};
-				}
 				let guidance = "";
 				const input = await ctx.ui.editor(
 					"Permission denied — how should I adjust to get approval?",

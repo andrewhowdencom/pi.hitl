@@ -8,7 +8,6 @@ This document describes the structure of `permissions.yaml` configuration files.
 |-----|------|----------|---------|-------------|
 | `version` | `number` | No | `1` | Config format version. Must be `1`. |
 | `default_action` | `string` | No | `block` | Action applied when no rule matches. One of: `allow`, `block`, `confirm`. |
-| `timeout` | `number` | No | `10000` | Timeout in milliseconds for confirmation prompts. If the user does not respond within this time, the operation is automatically denied. Only applies to `action: confirm` rules and `default_action: confirm`. |
 | `rules` | `Rule[]` | No | `[]` | Ordered list of rules evaluated top-to-bottom. |
 | `hidden_tools` | `string[]` | No | `[]` | Tool names that are silently blocked on every call. |
 
@@ -24,18 +23,6 @@ This document describes the structure of `permissions.yaml` configuration files.
 | `default` | `string` | No (leaf alt) | Shorthand for a catch-all leaf rule. Sets `action` to the value, `condition` to `"true"`, and `name` to `"Default"`. Explicit `name`, `condition`, or `action` override the inferred values. Mutually exclusive with `rules`. |
 
 A rule with `rules` is a **parent** — it has no `action` and its `condition` is prepended to every child's condition. A rule with `action` is a **leaf** and must not have `rules`.
-
-## Timeout behavior
-
-The `timeout` key controls how long confirmation prompts (`action: confirm`) wait for user input before being automatically denied. The default is **10 000 ms (10 seconds)**.
-
-When a timeout fires:
-- The operation is blocked with the rule's `message` (or a default reason if no message is set).
-- `deniedThisTurn` is set to `true`, so subsequent tools in the same turn are also blocked.
-- The guidance editor is **not** shown, because the user is assumed absent.
-- The underlying UI dialog may remain visible, but the extension has already returned a block response to pi.
-
-Timeout values are validated at load time. Invalid values (non-numeric, negative, or non-finite) log a warning and fall back to the default of `10000`.
 
 ## Config locations (merged)
 
