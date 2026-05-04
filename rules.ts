@@ -12,8 +12,23 @@ export interface Rule {
 export interface Config {
 	version: number;
 	default_action: Action;
+	timeout: number;
 	rules: Rule[];
 	hidden_tools: string[];
+}
+
+/**
+ * Parse and validate a timeout value from raw YAML input.
+ *
+ * Returns the parsed number and an optional warning message when the input
+ * is invalid (non-numeric, negative, or non-finite). Defaults to 10000 ms.
+ */
+export function parseTimeout(raw: unknown): { value: number; warning?: string } {
+	const timeout = Number(raw ?? 10000);
+	if (isNaN(timeout) || timeout < 0 || !isFinite(timeout)) {
+		return { value: 10000, warning: `Invalid timeout "${raw}", using 10000` };
+	}
+	return { value: timeout };
 }
 
 /**

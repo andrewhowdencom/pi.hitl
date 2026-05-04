@@ -54,6 +54,15 @@ What this does:
 
 Rules are checked top-to-bottom. The first matching rule wins.
 
+> **Note on timeouts:** Confirmation prompts automatically time out after **10 seconds** (10 000 ms) and are denied if the user does not respond. You can customize this with the `timeout` key at the top level of your config:
+>
+> ```yaml
+> version: 1
+> timeout: 5000  # 5-second timeout
+> rules:
+>   ...
+> ```
+
 ---
 
 ## Step 3: Test a file read inside the project
