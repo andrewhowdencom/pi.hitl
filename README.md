@@ -30,6 +30,8 @@ Result:
 - `read src/main.ts` → ✅ auto-approved (path is under cwd)
 - `write /etc/passwd` → ❌ blocked (outside cwd)
 - `bash rm -rf /` → 🔒 confirmation dialog appears
+- `bash ls && rm -rf /` → ❌ blocked (the `rm` segment is dangerous, so the whole compound command is blocked)
+- `bash tail -n1000 | head -20` → ✅ auto-approved (both segments are safe when whitelisted)
 
 ## Installation
 

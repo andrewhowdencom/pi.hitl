@@ -76,6 +76,7 @@ rules:
 - Arguments piped from stdin (`cat args.json | mcp-cli call ...`) can't be inspected — the rule matches on the visible command string only.
 - Only coarse server/tool-level rules are possible. You cannot do path-based sandboxing (e.g. "only allow reads within cwd") without parsing the JSON arguments.
 - If you need path-based rules for MCP filesystem operations, the mcp-cli arguments must be inline in the command. Piped JSON is invisible to CEL.
+- Compound mcp-cli commands (e.g. `mcp-cli call ... && mcp-cli call ...`) are evaluated per-segment. Each `mcp-cli` invocation is treated as a separate command segment, so rules like `command.contains("mcp-cli call filesystem")` match each segment independently.
 
 ## See also
 
