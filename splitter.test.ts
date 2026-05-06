@@ -145,4 +145,50 @@ describe("splitBashCommand", () => {
 			"ls",
 		]);
 	});
+
+	it("does not split inside back-ticks", () => {
+		assert.deepStrictEqual(splitBashCommand("echo `foo && bar` && ls"), [
+			"echo `foo && bar`",
+			"ls",
+		]);
+	});
+
+	it("does not split inside command substitution $()", () => {
+		assert.deepStrictEqual(splitBashCommand("echo $(foo && bar) && ls"), [
+			"echo $(foo && bar)",
+			"ls",
+		]);
+	});
+
+	it("does not split inside arithmetic expansion $((...))", () => {
+		assert.deepStrictEqual(splitBashCommand("echo $((1 && 2)) && ls"), [
+			"echo $((1 && 2))",
+			"ls",
+		]);
+	});
+
+	it("handles nested command substitution", () => {
+		assert.deepStrictEqual(
+			splitBashCommand("echo $(foo $(bar && baz)) && ls"),
+			["echo $(foo $(bar && baz))", "ls"],
+		);
+	});
+
+	it("does not split inside heredoc body", () => {
+		assert.deepStrictEqual(
+			splitBashCommand("cat <<EOF\nfoo && bar\nEOF && ls"),
+			["cat <<EOF\nfoo && bar\nEOF", "ls"],
+		);
+	});
+
+	it("does not split inside heredoc with dash", () => {
+		assert.deepStrictEqual(
+			splitBashCommand("cat <<-EOF\nfoo && bar\nEOF && ls"),
+			["cat <<-EOF\nfoo && bar\nEOF", "ls"],
+		);
+	});
+
+	it("handles consecutive separators producing empty segments", () => {
+		assert.deepStrictEqual(splitBashCommand("foo && && bar"), ["foo", "bar"]);
+	});
 });

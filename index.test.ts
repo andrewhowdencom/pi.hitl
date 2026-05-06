@@ -116,6 +116,51 @@ describe("resolveAction", () => {
 		const result = resolveAction(config, { command: "anything" }, false);
 		assert.strictEqual(result.type, "block");
 	});
+
+	it("first matching rule wins over later rules", () => {
+		const config: Config = {
+			version: 1,
+			default_action: "block",
+			rules: [
+				{
+					name: "Allow ls",
+					condition: 'command.startsWith("ls")',
+					action: "allow",
+				},
+				{
+					name: "Block ls",
+					condition: 'command.startsWith("ls")',
+					action: "block",
+					message: "ls is blocked",
+				},
+			],
+			hidden_tools: [],
+		};
+		const result = resolveAction(config, { command: "ls -la" }, true);
+		assert.strictEqual(result.type, "allow");
+	});
+
+	it("falls through to next rule when first rule has invalid CEL", () => {
+		const config: Config = {
+			version: 1,
+			default_action: "block",
+			rules: [
+				{
+					name: "Invalid CEL rule",
+					condition: 'command =', // invalid CEL syntax
+					action: "allow",
+				},
+				{
+					name: "Allow ls",
+					condition: 'command.startsWith("ls")',
+					action: "allow",
+				},
+			],
+			hidden_tools: [],
+		};
+		const result = resolveAction(config, { command: "ls -la" }, true);
+		assert.strictEqual(result.type, "allow");
+	});
 });
 
 describe("combineSegmentResults", () => {
