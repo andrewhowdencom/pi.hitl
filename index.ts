@@ -35,7 +35,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { run, isCelError, celFunc, CelScalar, parse as parseCel } from "@bufbuild/cel";
+import { resolveAction, combineSegmentResults } from "./evaluator.ts";
 import { parse as parseYaml } from "yaml";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
@@ -48,22 +48,11 @@ import {
 	buildBaseContext,
 	type ContextBuilderRegistration,
 } from "./context.ts";
+import { splitBashCommand } from "./splitter.ts";
 
 interface PermissionsState {
 	enabled: boolean;
 }
-
-// ─── CEL setup ──────────────────────────────────────────────────────────────
-
-/** Custom CEL function: regex matching. Usage: `command.matches("rm\\s+-rf")` */
-const matchesFunc = celFunc(
-	"matches",
-	[CelScalar.STRING, CelScalar.STRING],
-	CelScalar.BOOL,
-	(str: string, pattern: string) => new RegExp(pattern).test(str),
-);
-
-const CEL_OPTIONS = { funcs: [matchesFunc] };
 
 // ─── Config loading ─────────────────────────────────────────────────────────
 
@@ -162,22 +151,6 @@ function loadConfig(cwd: string): Config | undefined {
 }
 
 
-
-// ─── Rule evaluation ──────────────────────────────────────────────────────
-
-function evaluateRule(rule: Rule, context: Record<string, unknown>): boolean {
-	try {
-		const result = run(rule.condition, context as Parameters<typeof run>[1], CEL_OPTIONS);
-		if (isCelError(result)) {
-			console.error(`[permissions] CEL error in rule "${rule.name}":`, result);
-			return false;
-		}
-		return result === true;
-	} catch (e) {
-		console.error(`[permissions] Error evaluating rule "${rule.name}":`, e);
-		return false;
-	}
-}
 
 // ─── Extension ──────────────────────────────────────────────────────────────
 
@@ -299,30 +272,31 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		// Evaluate rules in order; first match wins
-		for (const rule of config.rules) {
-			if (evaluateRule(rule, context)) {
-				switch (rule.action) {
-					case "allow":
-						return undefined;
+		// For bash commands, evaluate each segment independently
+		if (event.toolName === "bash") {
+			const command = String(context.command ?? "");
+			const segments = splitBashCommand(command);
 
+			if (segments.length > 1) {
+				const results = segments.map((segment) => {
+					const segContext = { ...context, command: segment };
+					return resolveAction(config, segContext, ctx.hasUI);
+				});
+
+				// Combine: block > confirm > allow
+				const combined = combineSegmentResults(results);
+				switch (combined.type) {
 					case "block":
 						return {
 							block: true,
-							reason: rule.message ?? `Blocked by rule: ${rule.name}`,
+							reason: combined.reason,
 						};
 
 					case "confirm": {
-						if (!ctx.hasUI) {
-							return {
-								block: true,
-								reason:
-									rule.message ??
-									`Confirmation required for rule "${rule.name}" (no UI available)`,
-							};
-						}
+						const ruleNames = combined.ruleNames.join(", ");
 						const ok = await ctx.ui.confirm(
-							`🔒 Permission Rule: ${rule.name}`,
-							`${rule.message ?? "This operation requires approval."}\n\nTool: ${event.toolName}\n\nArgs:\n${JSON.stringify(event.input, null, 2)}\n\nAllow this tool call to execute?`,
+							`🔒 Permission Rule: ${ruleNames}`,
+							`${combined.messages.join("\n")}\n\nTool: ${event.toolName}\n\nArgs:\n${JSON.stringify(event.input, null, 2)}\n\nAllow this tool call to execute?`,
 						);
 						if (!ok) {
 							deniedThisTurn = true;
@@ -334,48 +308,50 @@ export default function (pi: ExtensionAPI) {
 							if (input?.trim()) {
 								guidance = `\n\nUser guidance: ${input.trim()}`;
 							}
-							return { block: true, reason: `Blocked by user (rule: ${rule.name})${guidance}` };
+							return { block: true, reason: `Blocked by user (rule: ${ruleNames})${guidance}` };
 						}
 						return undefined;
 					}
+
+					case "allow":
+						return undefined;
 				}
 			}
 		}
 
-		// No rule matched — apply default action
-		if (config.default_action === "block") {
-			return {
-				block: true,
-				reason: "Blocked by default — no matching permission rule",
-			};
-		}
-		if (config.default_action === "confirm") {
-			if (!ctx.hasUI) {
+		const result = resolveAction(config, context, ctx.hasUI);
+		switch (result.type) {
+			case "allow":
+				return undefined;
+
+			case "block":
 				return {
 					block: true,
-					reason: "Confirmation required by default (no UI available)",
+					reason: result.reason,
 				};
-			}
-			const ok = await ctx.ui.confirm(
-				`🔒 Permission Check`,
-				`No rule matched for tool "${event.toolName}".\n\nArgs:\n${JSON.stringify(event.input, null, 2)}\n\nAllow?`,
-			);
-			if (!ok) {
-				deniedThisTurn = true;
-				let guidance = "";
-				const input = await ctx.ui.editor(
-					"Permission denied — how should I adjust to get approval?",
-					"",
+
+			case "confirm": {
+				const ok = await ctx.ui.confirm(
+					`🔒 Permission Rule: ${result.ruleName}`,
+					`${result.message ?? "This operation requires approval."}\n\nTool: ${event.toolName}\n\nArgs:\n${JSON.stringify(event.input, null, 2)}\n\nAllow this tool call to execute?`,
 				);
-				if (input?.trim()) {
-					guidance = `\n\nUser guidance: ${input.trim()}`;
+				if (!ok) {
+					deniedThisTurn = true;
+					let guidance = "";
+					const input = await ctx.ui.editor(
+						"Permission denied — how should I adjust to get approval?",
+						"",
+					);
+					if (input?.trim()) {
+						guidance = `\n\nUser guidance: ${input.trim()}`;
+					}
+					return { block: true, reason: `Blocked by user (rule: ${result.ruleName})${guidance}` };
 				}
-				return { block: true, reason: `Blocked by user (default action)${guidance}` };
+				return undefined;
 			}
-			return undefined;
 		}
 
-		return undefined; // default_action === "allow"
+		return undefined;
 	});
 
 	// ─── Commands ─────────────────────────────────────────────────────────────

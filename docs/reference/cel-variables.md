@@ -10,7 +10,7 @@ This document lists all context variables and custom functions available in pi.h
 | `args` | `map` | Full tool arguments object. Access nested fields with dot notation: `args.path`, `args.timeout`. |
 | `cwd` | `string` | Absolute current working directory of the session. |
 | `path` | `string` | Resolved absolute path for file-based tools (`read`, `write`, `edit`). Empty string (`""`) for `bash` and tools without a `path` argument. |
-| `command` | `string` | Bash command string. Available only when `tool == "bash"`. Empty string for all other tools. |
+| `command` | `string` | Bash command string. Available only when `tool == "bash"`. Empty string for all other tools. When the command contains compound operators, rules are evaluated per-segment — see [Bash command segmentation](#bash-command-segmentation) below. |
 | `tool_source` | `string` | Tool origin: `"builtin"`, `"sdk"`, the extension path that registered it, or `"unknown"`. |
 | `tool_scope` | `string` | Tool scope: `"user"`, `"project"`, `"temporary"`, or `"unknown"`. |
 
@@ -23,6 +23,46 @@ This document lists all context variables and custom functions available in pi.h
 | `str.matches(pattern)` | `(string, string) → bool` | Regex match. The pattern is a JavaScript `RegExp` string. | `command.matches("rm\\s+-rf")` |
 
 Standard CEL functions also work: `==`, `!=`, `&&`, `\|\|`, `!`, comparison operators, string methods, and boolean logic.
+
+## Bash command segmentation
+
+For `bash` tool calls, compound commands that contain operators (`&&`, `||`, `|`, `;`, `&`, or newlines) are automatically split into individual command segments. CEL rules are evaluated **independently for each segment**, with the `command` variable set to that segment's text.
+
+### Splitting behavior
+
+The splitter respects shell quoting and escaping:
+- **Single quotes** (`'...'`) and **double quotes** (`"..."`) prevent splitting inside the quoted region.
+- **Backslash escapes** (`\&&`, `\|`) prevent splitting on the escaped operator.
+- **Redirect operators** (`>`, `<`, `>>`, `>&`, `<&`, `&>`) are **not** treated as command separators.
+
+### Combining precedence
+
+After evaluating rules for each segment, segment results are combined using this precedence:
+
+`block` > `confirm` > `default_action` > `allow`
+
+- If **any** segment matches a `block` rule → the whole compound command is **blocked**.
+- If **no** block but **any** segment matches a `confirm` rule → a **single** confirmation dialog is shown for the whole command.
+- If **all** segments match `allow` rules → the whole command is **allowed**.
+- If some segments have no matching rule → the segment falls through to `default_action`, which may result in block or confirm.
+
+### Example: whitelist with compound commands
+
+```yaml
+rules:
+  - name: "Allow safe commands"
+    condition: 'command.startsWith("ls") || command.startsWith("cat") || command.startsWith("tail")'
+    action: allow
+  - name: "Block everything else"
+    condition: 'tool == "bash"'
+    action: block
+```
+
+With this config:
+- `ls -la` → ✅ allowed (single segment matches)
+- `tail -n1000 | head -20` → ✅ allowed (both `tail` and `head` segments match)
+- `ls && rm -rf /` → ❌ blocked (`ls` segment allows, but `rm` segment falls to default `block`)
+- `echo "a && b"` → ✅ allowed (the `&&` is inside quotes, so it's one segment: `echo "a && b"`)
 
 ## Path resolution
 

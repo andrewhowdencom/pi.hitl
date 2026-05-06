@@ -85,6 +85,28 @@ describe("createContextBuilderRegistry", () => {
 		assert.ok(logs[0].includes("bad builder"));
 	});
 
+	it("a rejected async builder logs an error and does not affect other builders", async () => {
+		const registry = createContextBuilderRegistry();
+		registry.register("good", () => ({ good: true }));
+		registry.register("bad", async () => {
+			throw new Error("rejected builder");
+		});
+		registry.register("also_good", () => ({ also_good: true }));
+
+		const { result, logs } = await captureStderr(async () =>
+			registry.build("read", {}, "/tmp", mockCtx, {}),
+		);
+
+		const ctx = await result;
+		assert.strictEqual(ctx.good, true);
+		assert.strictEqual(ctx.also_good, true);
+		assert.strictEqual(ctx.bad, undefined);
+
+		assert.strictEqual(logs.length, 1);
+		assert.ok(logs[0].includes("bad"));
+		assert.ok(logs[0].includes("rejected builder"));
+	});
+
 	it("re-registering the same name replaces the builder", async () => {
 		const registry = createContextBuilderRegistry();
 		registry.register("same", () => ({ v: 1 }));
@@ -169,6 +191,11 @@ describe("buildBaseContext", () => {
 	it("sets empty command for bash tool without command argument", () => {
 		const result = buildBaseContext("bash", {}, "/tmp");
 		assert.strictEqual(result.command, "");
+	});
+
+	it("stringifies non-string command values", () => {
+		const result = buildBaseContext("bash", { command: 42 }, "/tmp");
+		assert.strictEqual(result.command, "42");
 	});
 
 	it("resolves relative path to absolute for file-based tools", () => {
