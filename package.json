@@ -6,8 +6,13 @@
     "pi-package"
   ],
   "license": "MIT",
+  "bin": {
+    "pi-hitl-validate": "./validate.ts"
+  },
   "scripts": {
-    "test": "tsx --test *.test.ts"
+    "test": "tsx --test *.test.ts",
+    "validate": "tsx validate.ts",
+    "validate:example": "tsx validate.ts .pi/nope.yaml .pi/permissions.test.yaml"
   },
   "pi": {
     "extensions": [

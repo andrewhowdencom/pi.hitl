@@ -1,0 +1,38 @@
+version: 1
+
+tests:
+  - name: "Read inside project is allowed"
+    tool: "read"
+    args:
+      path: "./src/index.ts"
+    cwd: "/home/user/project"
+    expected: allow
+
+  - name: "Write outside project is blocked"
+    tool: "write"
+    args:
+      path: "/etc/passwd"
+    cwd: "/home/user/project"
+    expected: block
+    expected_message_contains: "project directory"
+
+  - name: "Safe bash command is allowed"
+    tool: "bash"
+    args:
+      command: "head -20 README.md"
+    cwd: "/home/user/project"
+    expected: allow
+
+  - name: "Unknown bash command is blocked"
+    tool: "bash"
+    args:
+      command: "git push"
+    cwd: "/home/user/project"
+    expected: block
+
+  - name: "Compound command blocks if any segment is dangerous"
+    tool: "bash"
+    args:
+      command: "ls && rm -rf /"
+    cwd: "/home/user/project"
+    expected: block

@@ -37,7 +37,9 @@ export function flattenRules(
 	rawRules: unknown[],
 	parentCondition?: string,
 	parentName?: string,
+	onLog?: (...args: unknown[]) => void,
 ): Rule[] {
+	const log = onLog ?? console.error;
 	const rules: Rule[] = [];
 
 	for (const entry of rawRules) {
@@ -53,13 +55,13 @@ export function flattenRules(
 		// Handle default shorthand
 		if (raw.default !== undefined) {
 			if (nested) {
-				console.error(
+				log(
 					`[permissions] Warning: Rule "${name || "unnamed"}" has both "default" and nested rules; ignoring "default"`,
 				);
 			} else {
 				const defaultValue = String(raw.default);
 				if (!["allow", "block", "confirm"].includes(defaultValue)) {
-					console.error(
+					log(
 						`[permissions] Warning: Invalid default action "${defaultValue}":`,
 						entry,
 					);
@@ -67,12 +69,12 @@ export function flattenRules(
 				}
 
 				if (raw.action !== undefined) {
-					console.error(
+					log(
 						`[permissions] Warning: Rule has both "default" and explicit "action"; using explicit "action"`,
 					);
 				}
 				if (raw.condition !== undefined) {
-					console.error(
+					log(
 						`[permissions] Warning: Rule has both "default" and explicit "condition"; using explicit "condition"`,
 					);
 				}
@@ -84,7 +86,7 @@ export function flattenRules(
 		}
 
 		if (!name || !condition) {
-			console.error(
+			log(
 				`[permissions] Warning: Invalid rule (missing name or condition):`,
 				entry,
 			);
@@ -99,15 +101,15 @@ export function flattenRules(
 		if (nested) {
 			// Parent rule with children — action is ignored
 			if (action) {
-				console.error(
+				log(
 					`[permissions] Warning: Rule "${name}" has both action and nested rules; ignoring action`,
 				);
 			}
-			rules.push(...flattenRules(nested, fullCondition, fullName));
+			rules.push(...flattenRules(nested, fullCondition, fullName, onLog));
 		} else if (action) {
 			// Leaf rule
 			if (!["allow", "block", "confirm"].includes(action)) {
-				console.error(
+				log(
 					`[permissions] Warning: Invalid action "${action}" in rule "${fullName}"`,
 				);
 				continue;
@@ -117,7 +119,7 @@ export function flattenRules(
 			try {
 				parseCel(fullCondition);
 			} catch (e) {
-				console.error(
+				log(
 					`[permissions] Warning: Invalid CEL expression in rule "${fullName}":`,
 					e,
 				);
@@ -131,7 +133,7 @@ export function flattenRules(
 				message,
 			});
 		} else {
-			console.error(
+			log(
 				`[permissions] Warning: Rule "${name}" has neither action nor nested rules:`,
 				entry,
 			);
@@ -178,12 +180,17 @@ function reorderChildren(children: unknown[]): unknown[] {
  * children (those with a `default` key or `condition === "true"`) are
  * reordered to the end so specific rules are evaluated first.
  */
-export function mergeRules(base: unknown[], override: unknown[]): unknown[] {
+export function mergeRules(
+	base: unknown[],
+	override: unknown[],
+	onLog?: (...args: unknown[]) => void,
+): unknown[] {
+	const log = onLog ?? console.error;
 	const result: unknown[] = [...base];
 
 	for (const entry of override) {
 		if (!entry || typeof entry !== "object") {
-			console.error(
+			log(
 				`[permissions] Warning: Invalid rule (not an object):`,
 				entry,
 			);
@@ -196,7 +203,7 @@ export function mergeRules(base: unknown[], override: unknown[]): unknown[] {
 		const nested = Array.isArray(raw.rules) ? raw.rules : undefined;
 
 		if (!name || !condition) {
-			console.error(
+			log(
 				`[permissions] Warning: Invalid rule (missing name or condition):`,
 				entry,
 			);
@@ -221,7 +228,7 @@ export function mergeRules(base: unknown[], override: unknown[]): unknown[] {
 					? existing.rules
 					: [];
 				const mergedChildren = reorderChildren(
-					mergeRules(existingChildren, nested),
+					mergeRules(existingChildren, nested, onLog),
 				);
 				existing.rules = mergedChildren;
 				continue;

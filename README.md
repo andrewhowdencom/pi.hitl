@@ -65,6 +65,22 @@ cp index.ts .pi/extensions/permissions.ts
 pi -e ./index.ts
 ```
 
+## Testing your permissions
+
+Validate a `permissions.yaml` file without running the full pi extension:
+
+```bash
+npx pi-hitl-validate .pi/permissions.yaml
+```
+
+Add scenario tests in `.pi/permissions.test.yaml` and run them:
+
+```bash
+npx pi-hitl-validate .pi/permissions.yaml .pi/permissions.test.yaml
+```
+
+The validator checks CEL syntax, rule ordering, hidden-tool shadowing, and simulates how specific tool calls would be handled. See [How to test your permissions](docs/how-to/test-permissions.md) and the [scenario format reference](docs/reference/scenario-format.md) for details.
+
 ## Documentation
 
 For the full documentation — tutorials, how-to guides, reference, and architecture explanations — see the [documentation hub](docs/index.md).

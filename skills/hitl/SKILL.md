@@ -240,6 +240,54 @@ The `/permissions` command is available in every pi session:
 
 The `on`/`off` state is persisted across session reload, resume, and fork.
 
+## Validating permissions (for autonomous editing)
+
+**Pi cannot invoke `/permissions` slash commands autonomously.** Pi only has the `bash`, `read`, `write`, and `edit` tools. Therefore, after editing any `permissions.yaml` file, pi must run the standalone validator CLI via `bash` to check for errors.
+
+### Running validation
+
+After editing `.pi/permissions.yaml` (or any permissions config), run:
+
+```bash
+npx pi-hitl-validate .pi/permissions.yaml
+```
+
+If the project has scenario tests in `.pi/permissions.test.yaml`, also run:
+
+```bash
+npx pi-hitl-validate .pi/permissions.yaml .pi/permissions.test.yaml
+```
+
+**Fallback if `npx pi-hitl-validate` is not available:**
+
+```bash
+npx tsx /path/to/pi.hitl/validate.ts .pi/permissions.yaml
+```
+
+### Interpreting output
+
+- **Exit code 0** with no errors/warnings → config is valid. Proceed.
+- **Exit code 0** with warnings → config loads but may have issues (e.g., catch-all not last, duplicate rule names). Review warnings and fix if appropriate.
+- **Exit code 1** with errors → config has problems that will cause it to behave incorrectly or fail. Fix all errors and re-validate before proceeding.
+
+### Common validation errors and fixes
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Invalid CEL expression` | Syntax error in `condition` (e.g., `tool = "bash"` instead of `==`, unclosed quotes) | Check CEL syntax: use `==` for equality, quote strings, escape backslashes in regexes |
+| `Invalid action: "..."` | `action` is not `allow`, `block`, or `confirm` | Correct to one of the three valid values |
+| `Catch-all rule ... is not the last rule` | A `condition: 'true'` rule appears before more specific rules | Move the catch-all to the end of the rules list |
+| `Hidden tool "..." may shadow rule` | A tool is in `hidden_tools` and also referenced in a rule | Either remove the tool from `hidden_tools` or remove the redundant rule |
+| `Duplicate rule name` | Two rules share the same `name` | Give each rule a unique name |
+
+### Workflow for editing permissions
+
+1. Edit `.pi/permissions.yaml` using the `write` or `edit` tool.
+2. Run `npx pi-hitl-validate .pi/permissions.yaml` via `bash`.
+3. If errors are reported, fix them and re-validate.
+4. If the project has `.pi/permissions.test.yaml`, run scenarios and verify they pass.
+5. Only proceed with other tasks once validation is clean.
+
 ## Best Practices
 
 1. **Order matters.** Put the most specific rules first, catch-all rules last. A `condition: 'true'` catch-all at the end is a common pattern.

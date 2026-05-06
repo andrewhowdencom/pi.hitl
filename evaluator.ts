@@ -27,7 +27,7 @@ export function evaluateRule(rule: Rule, context: Record<string, unknown>): bool
 
 export type ResolvedAction =
 	| { type: "allow" }
-	| { type: "block"; reason: string }
+	| { type: "block"; reason: string; ruleName?: string }
 	| { type: "confirm"; ruleName: string; message?: string };
 
 export function resolveAction(
@@ -45,6 +45,7 @@ export function resolveAction(
 					return {
 						type: "block",
 						reason: rule.message ?? `Blocked by rule: ${rule.name}`,
+						ruleName: rule.name,
 					};
 
 				case "confirm": {
@@ -54,6 +55,7 @@ export function resolveAction(
 							reason:
 								rule.message ??
 								`Confirmation required for rule "${rule.name}" (no UI available)`,
+							ruleName: rule.name,
 						};
 					}
 					return { type: "confirm", ruleName: rule.name, message: rule.message };
@@ -67,31 +69,36 @@ export function resolveAction(
 		case "allow":
 			return { type: "allow" };
 		case "block":
-			return { type: "block", reason: "Blocked by default — no matching permission rule" };
+			return { type: "block", reason: "Blocked by default — no matching permission rule", ruleName: "default" };
 		case "confirm": {
 			if (!hasUI) {
 				return {
 					type: "block",
 					reason: "Confirmation required by default (no UI available)",
+					ruleName: "default",
 				};
 			}
 			return { type: "confirm", ruleName: "default", message: undefined };
 		}
 		default: {
-			return { type: "block", reason: "Blocked by default — no matching permission rule" };
+			return { type: "block", reason: "Blocked by default — no matching permission rule", ruleName: "default" };
 		}
 	}
 }
 
 export type CombinedAction =
 	| { type: "allow" }
-	| { type: "block"; reason: string }
+	| { type: "block"; reason: string; ruleNames?: string[] }
 	| { type: "confirm"; ruleNames: string[]; messages: string[] };
 
 export function combineSegmentResults(results: ResolvedAction[]): CombinedAction {
 	const blocking = results.filter((r) => r.type === "block");
 	if (blocking.length > 0) {
-		return { type: "block", reason: blocking.map((r) => r.reason).join("; ") };
+		return {
+			type: "block",
+			reason: blocking.map((r) => r.reason).join("; "),
+			ruleNames: blocking.map((r) => r.ruleName).filter((n): n is string => !!n),
+		};
 	}
 
 	const confirming = results.filter((r) => r.type === "confirm");

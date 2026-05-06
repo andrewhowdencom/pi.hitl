@@ -36,12 +36,11 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { resolveAction, combineSegmentResults } from "./evaluator.ts";
-import { parse as parseYaml } from "yaml";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, readFileSync } from "node:fs";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
-import { type Action, type Rule, type Config, flattenRules, mergeRules } from "./rules.ts";
+import { type Config } from "./rules.ts";
+import { loadConfigFromFiles } from "./config.ts";
 import {
 	createContextBuilderRegistry,
 	createToolMetadataCache,
@@ -55,100 +54,6 @@ interface PermissionsState {
 }
 
 // ─── Config loading ─────────────────────────────────────────────────────────
-
-function loadConfig(cwd: string): Config | undefined {
-	const agentsPath = resolve(homedir(), ".agents", "permissions.yaml");
-	const globalPath = resolve(getAgentDir(), "permissions.yaml");
-	const projectPath = resolve(cwd, ".pi", "permissions.yaml");
-
-	let raw: Record<string, unknown> = {};
-
-	// Load agent-wide defaults
-	if (existsSync(agentsPath)) {
-		try {
-			const text = readFileSync(agentsPath, "utf-8");
-			const parsed = parseYaml(text) as Record<string, unknown>;
-			if (parsed && typeof parsed === "object") {
-				raw = { ...parsed };
-			}
-		} catch (e) {
-			console.error(`[permissions] Warning: Could not parse ${agentsPath}:`, e);
-		}
-	}
-
-	// Load global config (merged with agent-wide defaults)
-	if (existsSync(globalPath)) {
-		try {
-			const text = readFileSync(globalPath, "utf-8");
-			const parsed = parseYaml(text) as Record<string, unknown>;
-			if (parsed && typeof parsed === "object") {
-				raw = {
-					...raw,
-					...parsed,
-					rules: mergeRules(
-						Array.isArray(raw.rules) ? raw.rules : [],
-						Array.isArray(parsed.rules) ? parsed.rules : [],
-					),
-					hidden_tools: [
-						...(Array.isArray(raw.hidden_tools) ? raw.hidden_tools : []),
-						...(Array.isArray(parsed.hidden_tools) ? parsed.hidden_tools : []),
-					],
-				};
-			}
-		} catch (e) {
-			console.error(`[permissions] Warning: Could not parse ${globalPath}:`, e);
-		}
-	}
-
-	// Load and merge project config (project overrides global)
-	if (existsSync(projectPath)) {
-		try {
-			const text = readFileSync(projectPath, "utf-8");
-			const parsed = parseYaml(text) as Record<string, unknown>;
-			if (parsed && typeof parsed === "object") {
-				raw = {
-					...raw,
-					...parsed,
-					rules: mergeRules(
-						Array.isArray(raw.rules) ? raw.rules : [],
-						Array.isArray(parsed.rules) ? parsed.rules : [],
-					),
-					hidden_tools: [
-						...(Array.isArray(raw.hidden_tools) ? raw.hidden_tools : []),
-						...(Array.isArray(parsed.hidden_tools) ? parsed.hidden_tools : []),
-					],
-				};
-			}
-		} catch (e) {
-			console.error(`[permissions] Warning: Could not parse ${projectPath}:`, e);
-		}
-	}
-
-	const rawRules = Array.isArray(raw.rules) ? raw.rules : [];
-	if (rawRules.length === 0 && !Array.isArray(raw.hidden_tools)) {
-		return undefined; // No config found — extension is inactive
-	}
-
-	// Validate and flatten nested rules into a single ordered list
-	const rules = flattenRules(rawRules);
-
-	const hidden_tools = Array.isArray(raw.hidden_tools)
-		? [...new Set(raw.hidden_tools.map(String))]
-		: [];
-
-	let default_action = (raw.default_action as Action) ?? "block";
-	if (!["allow", "block", "confirm"].includes(default_action)) {
-		console.error(`[permissions] Warning: Invalid default_action "${default_action}", using "block"`);
-		default_action = "block";
-	}
-
-	return {
-		version: Number(raw.version ?? 1),
-		default_action,
-		rules,
-		hidden_tools,
-	};
-}
 
 
 
@@ -169,7 +74,10 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	function reloadConfig(cwd: string) {
-		config = loadConfig(cwd);
+		const agentsPath = resolve(homedir(), ".agents", "permissions.yaml");
+		const globalPath = resolve(getAgentDir(), "permissions.yaml");
+		const projectPath = resolve(cwd, ".pi", "permissions.yaml");
+		config = loadConfigFromFiles([agentsPath, globalPath, projectPath]);
 	}
 
 	// Restore persisted state on session start / reload / resume / fork

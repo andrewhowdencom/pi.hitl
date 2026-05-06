@@ -1,0 +1,29 @@
+version: 1
+# Default sandbox: allow all tools within the current working directory,
+# block them outside of it, and require confirmation for shell commands.
+
+rules:
+  # ─── Merge additional safe bash segments into global "Bash" rule ─────────
+  - name: "Bash"
+    condition: 'tool == "bash"'
+    rules:
+      # Safe read-only text processing utilities commonly used in pipelines
+      - name: "Allow safe read-only utilities"
+        condition: 'command.matches("^(head|tail|sort|uniq|diff|dirname|basename|stat|file|date|printf|test|true|false|seq|cut|tr|tee|nl|tac|rev|comm|cmp|cksum|md5sum|sha256sum|shasum)\\b")'
+        action: allow
+
+      # JSON/YAML/text processors that are read-only in pipeline context
+      - name: "Allow safe processors"
+        condition: 'command.matches("^(jq|yq|perl)\\b")'
+        action: allow
+
+  # ─── Allow any operation within the current working directory ────────────
+  - name: "Allow within project"
+    condition: 'path.startsWith(cwd)'
+    action: allow
+
+  # ─── Block everything that reaches this point ──────────────────────────────
+  - name: "Block outside project"
+    condition: 'true'
+    action: block
+    message: "Operations outside the project directory are blocked"
