@@ -1,4 +1,4 @@
-# Handle MCP-CLI calls through bash
+# How to handle MCP-CLI calls through bash
 
 The pi coding agent can use [mcp-cli](../README.md) to interact with MCP servers. Since mcp-cli runs through the `bash` tool, the `path` CEL variable is `""` by default — the actual path is buried inside JSON in the command string.
 
@@ -80,6 +80,6 @@ rules:
 
 ## See also
 
-- [Allow safe built-in tools without confirmation dialogs](allow-harmless-tools.md)
+- [How to allow harmless tools without approval](how-to-allow-harmless-tools.md)
 - [CEL variables, including `command`](../reference/cel-variables.md)
 - [YAML rule schema](../reference/config-schema.md)

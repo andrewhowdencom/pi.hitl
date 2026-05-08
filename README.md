@@ -33,6 +33,8 @@ Result:
 - `bash ls && rm -rf /` → ❌ blocked (the `rm` segment is dangerous, so the whole compound command is blocked)
 - `bash tail -n1000 | head -20` → ✅ auto-approved (both segments are safe when whitelisted)
 
+The conditions above use `tool`, `path`, and `cwd`. Other available CEL variables include `args`, `command`, `tool_source`, and `tool_scope`. The `matches` function is a custom CEL extension that works as a method on string values, e.g. `command.matches("rm\\s+-rf")`. See the [full CEL variable reference](docs/reference/cel-variables.md) for details.
+
 ## Installation
 
 ### Via `pi install` (recommended)
@@ -53,6 +55,8 @@ Global (all projects):
 ```bash
 cp index.ts ~/.pi/agent/extensions/permissions.ts
 ```
+
+> The destination file name is not significant; `permissions.ts` is just a convention.
 
 Project-local (current project only):
 ```bash

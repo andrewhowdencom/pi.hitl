@@ -131,6 +131,10 @@ export function createToolMetadataCache(): {
  * Assemble the base CEL context variables that pi.hitl provides for every
  * tool call. This is the fixed, built-in context before any extension builders
  * run.
+ *
+ * Note: `tool_source` and `tool_scope` are appended by the caller after this
+ * function returns, using metadata from the tool cache. Additional keys may
+ * also be injected by extension-registered context builders.
  */
 export function buildBaseContext(
 	toolName: string,

@@ -1,4 +1,4 @@
-# Allow harmless tools without approval
+# How to allow harmless tools without approval
 
 Some tools (like `TaskCreate`, `TaskUpdate`, etc.) are read-only or tracking-only but still trigger the `default_action` — causing confirmation dialogs or blocks on every call. This guide shows how to blanket-allow them so they execute without interrupting your workflow.
 
@@ -68,6 +68,6 @@ rules:
 
 ## See also
 
-- [Write rules for mcp-cli invocations through the bash tool](handle-mcp-cli-calls.md)
+- [How to handle MCP-CLI calls through bash](how-to-handle-mcp-cli-calls.md)
 - [Full list of CEL variables available in conditions](../reference/cel-variables.md)
 - [YAML configuration schema and nested rules](../reference/config-schema.md)

@@ -2,6 +2,12 @@
 
 pi.hitl is a CEL-based permission sandbox for the [pi coding agent](https://github.com/badlogic/pi-mono).
 
+This documentation follows the [Diátaxis framework](https://diataxis.fr), which organizes docs into four types based on what the reader needs:
+- **Tutorials** — Step-by-step lessons for first-time learners.
+- **How-to Guides** — Problem-oriented recipes for specific situations.
+- **Reference** — Technical descriptions of the system's nuts and bolts.
+- **Explanation** — Understanding-oriented discussions of design rationale and architecture.
+
 ---
 
 ## New here?
@@ -20,8 +26,8 @@ Tutorials are **learning-oriented** step-by-step guides for first-time users.
 
 How-to guides are **problem-oriented** recipes for specific situations.
 
-- [Allow harmless tools without approval](how-to/allow-harmless-tools.md) — Blanket-allow safe tools so they don't trigger confirmation dialogs
-- [Handle MCP-CLI calls through bash](how-to/handle-mcp-cli-calls.md) — Write rules for mcp-cli running through the `bash` tool
+- [How to allow harmless tools without approval](how-to/how-to-allow-harmless-tools.md) — Blanket-allow safe tools so they don't trigger confirmation dialogs
+- [How to handle MCP-CLI calls through bash](how-to/how-to-handle-mcp-cli-calls.md) — Write rules for mcp-cli running through the `bash` tool
 
 ## Reference
 
@@ -35,4 +41,4 @@ Reference docs are **information-oriented** descriptions of the system's nuts an
 
 Explanation docs are **understanding-oriented** discussions of design rationale and architecture.
 
-- [Architecture and design rationale](explanation/architecture.md) — How pi.hitl works and why it was designed this way
+- [About pi.hitl architecture](explanation/architecture.md) — How pi.hitl works and why it was designed this way

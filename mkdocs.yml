@@ -26,8 +26,8 @@ nav:
   - Tutorials:
     - Getting Started: tutorials/getting-started.md
   - How-to Guides:
-    - Allow harmless tools without approval: how-to/allow-harmless-tools.md
-    - Handle MCP-CLI calls through bash: how-to/handle-mcp-cli-calls.md
+    - How to allow harmless tools without approval: how-to/how-to-allow-harmless-tools.md
+    - How to handle MCP-CLI calls through bash: how-to/how-to-handle-mcp-cli-calls.md
   - Reference:
     - YAML configuration schema: reference/config-schema.md
     - CEL variables and functions: reference/cel-variables.md

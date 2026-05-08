@@ -2,6 +2,26 @@
 
 This tutorial walks you through installing pi.hitl and setting up your first permission sandbox. No prior knowledge of CEL or pi extensions is assumed.
 
+## Learning Objectives
+
+By the end of this tutorial, you will be able to:
+
+- Install pi.hitl in your pi environment.
+- Write a basic `permissions.yaml` configuration with allow, block, and confirm rules.
+- Predict how different tool calls are evaluated against your rules.
+- Reload a changed configuration without restarting your pi session.
+
+## Intended Audience & Prerequisites
+
+- **Who this is for:** First-time pi.hitl users who want to set up a permission sandbox for their projects.
+- **Prerequisites:**
+  - A working [pi](https://github.com/badlogic/pi-mono) installation.
+  - Basic familiarity with YAML syntax (key-value pairs, lists, indentation).
+
+## Background
+
+pi.hitl is a permission sandbox that intercepts every tool call an LLM makes inside pi and evaluates it against rules you define in YAML. Each rule has a CEL (Common Expression Language) condition and an action: **allow** the call through, **block** it, or **confirm** it with an interactive dialog. Rules are checked top-to-bottom, and the first matching rule wins — like a firewall. This tutorial builds a simple three-rule sandbox step by step so you can see how each rule behaves in isolation.
+
 ---
 
 ## Step 1: Install pi.hitl
@@ -22,12 +42,132 @@ Done.
 
 ---
 
-## Step 2: Create a permission configuration
+## Step 2: Create the config directory
 
-Inside your project directory, create the folder and file `.pi/permissions.yaml`:
+Inside your project directory, create the `.pi` folder where configuration lives:
 
 ```bash
 mkdir -p .pi
+```
+
+---
+
+## Step 3: Add the first rule — confirm all bash commands
+
+Create `.pi/permissions.yaml` with a single rule that requires manual approval for every shell command:
+
+```bash
+cat > .pi/permissions.yaml << 'EOF'
+version: 1
+rules:
+  - name: "Confirm bash commands"
+    condition: 'tool == "bash"'
+    action: confirm
+    message: "Shell commands require manual approval"
+EOF
+```
+
+What this does:
+- Whenever the agent tries to run a `bash` command, a confirmation dialog appears.
+- File reads and writes are not matched by this rule, so they fall through to the default action (`block`).
+
+Verify the file:
+
+```bash
+cat .pi/permissions.yaml
+```
+
+---
+
+## Step 4: Test the bash confirmation rule
+
+Start a `pi` session in your project directory and ask it to run a bash command:
+
+```
+pi
+> list the files in the current directory
+```
+
+Expected behavior:
+```
+🔒 Permission Rule: Confirm bash commands
+Shell commands require manual approval
+
+Tool: bash
+Args:
+{
+  "command": "ls -la"
+}
+
+Allow this tool call to execute? (Y/n)
+```
+
+Type **Y** and press Enter to approve. The command runs, and you see the directory listing.
+
+Try another command:
+
+```
+> show me the current git status
+```
+
+You will see the same confirmation dialog again because every `bash` call matches this rule.
+
+---
+
+## Step 5: Add the second rule — allow file operations inside the project
+
+Now add a rule that auto-approves file reads and writes when the path is inside your project directory. Update the file to include both rules:
+
+```bash
+cat > .pi/permissions.yaml << 'EOF'
+version: 1
+rules:
+  - name: "Confirm bash commands"
+    condition: 'tool == "bash"'
+    action: confirm
+    message: "Shell commands require manual approval"
+
+  - name: "Allow within project"
+    condition: 'path.startsWith(cwd)'
+    action: allow
+EOF
+```
+
+What this does:
+- **Rule 1** still matches first for bash commands ( confirmation dialog).
+- **Rule 2** matches file operations (`read`, `write`, `edit`) whose resolved path starts with the current working directory.
+- Rules are checked top-to-bottom. The first matching rule wins.
+
+Verify the file:
+
+```bash
+cat .pi/permissions.yaml
+```
+
+---
+
+## Step 6: Test the allow-within-project rule
+
+Inside your active pi session, ask the agent to read a file:
+
+```
+> read the contents of README.md
+```
+
+Expected behavior:
+```
+✅ read README.md — allowed (path is under cwd)
+```
+
+The file read goes through without any dialog because it matches the "Allow within project" rule.
+
+---
+
+## Step 7: Add the third rule — block operations outside the project
+
+Add a catch-all rule at the end that blocks anything not matched above:
+
+```bash
 cat > .pi/permissions.yaml << 'EOF'
 version: 1
 rules:
@@ -48,59 +188,21 @@ EOF
 ```
 
 What this does:
-- **Rule 1** — Every `bash` tool call shows a confirmation dialog before running.
-- **Rule 2** — File operations inside your project directory are auto-approved.
-- **Rule 3** — Anything not matched above (operations outside the project) is blocked.
+- **Rule 1** — Bash commands → confirmation dialog.
+- **Rule 2** — File operations inside the project → auto-approved.
+- **Rule 3** — Anything else (operations outside the project) → blocked immediately.
 
-Rules are checked top-to-bottom. The first matching rule wins.
+The `condition: 'true'` is a catch-all that matches every tool call. Because it is the last rule, it only catches calls that Rules 1 and 2 did not match.
+
+Verify the file:
+
+```bash
+cat .pi/permissions.yaml
+```
 
 ---
 
-## Step 3: Test a file read inside the project
-
-Start a `pi` session in your project directory and ask it to read a file:
-
-```
-pi
-> read the contents of README.md
-```
-
-Expected behavior:
-```
-✅ read README.md — allowed (path is under cwd)
-```
-
-The file read goes through without any dialog because it matches the "Allow within project" rule.
-
----
-
-## Step 4: Test a shell command
-
-Ask the agent to run a bash command:
-
-```
-> list the files in the current directory
-```
-
-Expected behavior:
-```
-🔒 Permission Rule: Confirm bash commands
-Shell commands require manual approval
-
-Tool: bash
-Args:
-{
-  "command": "ls -la"
-}
-
-Allow this tool call to execute? (Y/n)
-```
-
-Type **Y** and press Enter to approve. The command runs, and you see the directory listing.
-
----
-
-## Step 5: Test a file read outside the project
+## Step 8: Test the block-outside-project rule
 
 Ask the agent to read a file outside your project:
 
@@ -116,9 +218,22 @@ Operations outside the project directory are blocked
 
 The request is rejected immediately. No dialog appears because the "Block outside project" rule matches first.
 
+Test a compound bash command to see how segmentation works:
+
+```
+> run ls && rm -rf /
+```
+
+Expected behavior:
+```
+❌ Blocked by rule: Block outside project
+```
+
+Wait — this is a bash command, so why didn't it show the confirmation dialog? Because the `rm -rf /` segment is evaluated independently and falls through to the default action (`block`), which blocks the entire compound command. (For details, see [Bash command segmentation](../reference/cel-variables.md#bash-command-segmentation).)
+
 ---
 
-## Step 6: Check the loaded rules
+## Step 9: Check the loaded rules
 
 Type the permissions command to see what rules are currently active:
 
@@ -142,7 +257,7 @@ This confirms that all three rules were loaded from `.pi/permissions.yaml`.
 
 ---
 
-## Step 7: Edit the config and reload without restarting
+## Step 10: Edit the config and reload without restarting
 
 Open `.pi/permissions.yaml` in an editor and change the default action from `block` to `confirm`:
 
@@ -190,4 +305,4 @@ Because `default_action` is now `confirm` and no earlier rule matched, a confirm
 
 - Learn practical rule recipes in the [How-to Guides](../index.md#how-to-guides).
 - Understand every CEL variable and function in the [Reference](../reference/cel-variables.md).
-- Read why pi.hitl is designed this way in the [Architecture Explanation](../explanation/architecture.md).
+- Read why pi.hitl is designed this way in [About pi.hitl architecture](../explanation/architecture.md).

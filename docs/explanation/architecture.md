@@ -1,4 +1,4 @@
-# How pi.hitl Works
+# About pi.hitl architecture
 
 This document explains the design decisions behind pi.hitl's architecture. It is intended for users who want to understand *why* the system behaves the way it does, not just *how* to configure it.
 

@@ -110,6 +110,8 @@ These variables are available in every `condition` expression:
 | `cwd` | `string` | Absolute current working directory of the session. |
 | `path` | `string` | Resolved absolute path for file-based tools (`read`, `write`, `edit`). Empty string (`""`) for `bash` and tools without a `path` argument. |
 | `command` | `string` | Bash command string. Available only when `tool == "bash"`. Empty string for all other tools. |
+| `tool_source` | `string` | Tool origin: `"builtin"`, `"sdk"`, the extension path that registered it, or `"unknown"`. |
+| `tool_scope` | `string` | Tool scope: `"user"`, `"project"`, `"temporary"`, or `"unknown"`. |
 
 ### Path Resolution
 
